@@ -1,0 +1,11 @@
+run:
+python run.py --port 2222 --username user1 --password pass123
+
+to generate private key:
+ssh-keygen -t rsa -b 2048 -m PEM -f static/server.key
+
+second terminal:
+ssh user1@localhost -p 2222
+
+known hosts:
+notepad "$HOME\.ssh\known_hosts"
