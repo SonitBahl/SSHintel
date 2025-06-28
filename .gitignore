@@ -1,2 +1,2 @@
-audit.log
-cmd_audit.log
+static/server.key
+static/server.key.pub
