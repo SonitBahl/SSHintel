@@ -1,6 +1,5 @@
 import paramiko
 import time
-import threading
 import socket
 from pathlib import Path
 
@@ -10,68 +9,158 @@ from .logger import funnel_logger
 host_key_path = Path(__file__).parent.parent / 'static' / 'server.key'
 host_key = paramiko.RSAKey(filename=host_key_path)
 
+fake_fs = {
+    "home": {
+        "user1": {
+            "notes.txt": "This is a test file.",
+            "script.sh": "#!/bin/bash\necho Hello World",
+            "Documents": {},
+            "Downloads": {},
+        }
+    }
+}
+
+def resolve_path(cwd, target):
+    if target.startswith("/"):
+        return target
+    return cwd.rstrip("/") + "/" + target
+
+def get_dir(path):
+    parts = [p for p in path.strip("/").split("/") if p]
+    cur = fake_fs
+    for p in parts:
+        if isinstance(cur, dict) and p in cur:
+            cur = cur[p]
+        else:
+            return None
+    return cur
+
 def emulated_shell(channel, client_ip):
-    prompt = b"user1@ubuntu:~$ "
-    channel.send(prompt)
-    command = b""
+    prompt_template = "user1@ubuntu:{}$ "
     cwd = "/home/user1"
+    cwd_display = "~"
+    prompt = prompt_template.format(cwd_display).encode()
+    command = b""
+    channel.send(prompt)
 
     while True:
         char = channel.recv(1)
         if not char:
             break
-        channel.send(char)
-        command += char
 
         if char == b"\r":
+            channel.send(b"\r\n")
             cmd = command.strip().decode()
+            response = b""
 
             if cmd == "exit":
-                channel.send(b"\nlogout\n")
+                channel.send(b"logout\r\n")
                 break
 
-            response = b"\n"
-            if cmd == "pwd":
-                response += cwd.encode() + b"\n"
+            elif cmd == "pwd":
+                response += cwd.encode()
+
             elif cmd == "whoami":
-                response += b"user1\n"
-            elif cmd == "ls":
-                response += b"Documents  Downloads  script.sh  notes.txt\n"
-            elif cmd.startswith("cat "):
-                filename = cmd[4:].strip()
-                if filename == "notes.txt":
-                    response += b"This is a test file.\n"
-                elif filename == "script.sh":
-                    response += b"#!/bin/bash\necho Hello World\n"
-                else:
-                    response += f"cat: {filename}: No such file or directory\n".encode()
-            elif cmd.startswith("echo "):
-                response += cmd[5:].encode() + b"\n"
-            elif cmd == "uname -a":
-                response += b"Linux ubuntu 5.15.0-50-generic #56~20.04 SMP x86_64 GNU/Linux\n"
+                response += b"user1"
+
             elif cmd == "hostname":
-                response += b"ubuntu\n"
-            elif cmd == "clear":
-                response = b"\033[2J\033[H"
+                response += b"ubuntu"
+
+            elif cmd == "uname -a":
+                response += b"Linux ubuntu 5.15.0-50-generic #56~20.04 SMP x86_64 GNU/Linux"
+
             elif cmd == "id":
-                response += b"uid=1001(user1) gid=1001(user1) groups=1001(user1)\n"
+                response += b"uid=1001(user1) gid=1001(user1) groups=1001(user1)"
+
+            elif cmd == "clear":
+                response += b"\033[2J\033[H"
+
             elif cmd.startswith("cd "):
                 target = cmd[3:].strip()
-                if target.startswith("/"):
-                    cwd = target
+                new_path = "/".join(cwd.strip("/").split("/")[:-1]) if target == ".." else resolve_path(cwd, target)
+                if get_dir(new_path):
+                    cwd = new_path
                 else:
-                    cwd = f"{cwd}/{target}"
-            elif cmd == "mkdir test":
-                response += b""
-            elif cmd == "rm test":
-                response += b""
+                    response += f"bash: cd: {target}: No such file or directory".encode()
+
+            elif cmd == "ls":
+                dir_obj = get_dir(cwd)
+                if isinstance(dir_obj, dict):
+                    response += "  ".join(dir_obj.keys()).encode()
+                else:
+                    response += f"ls: cannot access '{cwd}': Not a directory".encode()
+
+            elif cmd.startswith("mkdir "):
+                dirname = cmd[6:].strip()
+                dir_obj = get_dir(cwd)
+                if isinstance(dir_obj, dict):
+                    if dirname not in dir_obj:
+                        dir_obj[dirname] = {}
+                    else:
+                        response += f"mkdir: cannot create directory '{dirname}': File exists".encode()
+
+            elif cmd.startswith("touch "):
+                filename = cmd[6:].strip()
+                dir_obj = get_dir(cwd)
+                if isinstance(dir_obj, dict):
+                    dir_obj[filename] = ""
+
+            elif cmd.startswith("rm "):
+                filename = cmd[3:].strip()
+                dir_obj = get_dir(cwd)
+                if isinstance(dir_obj, dict):
+                    if filename in dir_obj:
+                        del dir_obj[filename]
+                    else:
+                        response += f"rm: cannot remove '{filename}': No such file".encode()
+
+            elif cmd.startswith("cat "):
+                filename = cmd[4:].strip()
+                dir_obj = get_dir(cwd)
+                if isinstance(dir_obj, dict) and filename in dir_obj:
+                    content = dir_obj[filename]
+                    if isinstance(content, str):
+                        response += content.encode()
+                    else:
+                        response += f"cat: {filename}: Is a directory".encode()
+                else:
+                    response += f"cat: {filename}: No such file or directory".encode()
+
+            elif ">" in cmd and cmd.startswith("echo "):
+                try:
+                    parts = cmd[5:].split(">")
+                    msg = parts[0].strip()
+                    fname = parts[1].strip()
+                    dir_obj = get_dir(cwd)
+                    if isinstance(dir_obj, dict):
+                        dir_obj[fname] = msg
+                except Exception:
+                    response += b"bash: syntax error near unexpected token `>'"
+
+            elif cmd.startswith("echo "):
+                msg = cmd[5:].strip()
+                response += msg.encode()
+
+            elif cmd == "":
+                pass 
+
             else:
-                response += f"{cmd}: command not found\n".encode()
+                response += f"bash: {cmd}: command not found".encode()
 
             funnel_logger.info(f'Command "{cmd}" executed by {client_ip}')
-            channel.send(response)
+
+            if response:
+                channel.send(response + b"\r\n")
+
+            cwd_display = cwd.replace("/home/user1", "~") if cwd.startswith("/home/user1") else cwd
+            prompt = prompt_template.format(cwd_display).encode()
             channel.send(prompt)
+
             command = b""
+        else:
+            channel.send(char)
+            command += char
+
     channel.close()
 
 def client_handle(client, addr, username, password, tarpit=False):
