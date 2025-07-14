@@ -56,25 +56,18 @@ def emulated_shell(channel, client_ip):
             if cmd == "exit":
                 channel.send(b"logout\r\n")
                 break
-
             elif cmd == "pwd":
                 response += cwd.encode()
-
             elif cmd == "whoami":
                 response += b"user1"
-
             elif cmd == "hostname":
                 response += b"ubuntu"
-
             elif cmd == "uname -a":
                 response += b"Linux ubuntu 5.15.0-50-generic #56~20.04 SMP x86_64 GNU/Linux"
-
             elif cmd == "id":
                 response += b"uid=1001(user1) gid=1001(user1) groups=1001(user1)"
-
             elif cmd == "clear":
                 response += b"\033[2J\033[H"
-
             elif cmd.startswith("cd "):
                 target = cmd[3:].strip()
                 new_path = "/".join(cwd.strip("/").split("/")[:-1]) if target == ".." else resolve_path(cwd, target)
@@ -82,14 +75,12 @@ def emulated_shell(channel, client_ip):
                     cwd = new_path
                 else:
                     response += f"bash: cd: {target}: No such file or directory".encode()
-
             elif cmd == "ls":
                 dir_obj = get_dir(cwd)
                 if isinstance(dir_obj, dict):
                     response += "  ".join(dir_obj.keys()).encode()
                 else:
                     response += f"ls: cannot access '{cwd}': Not a directory".encode()
-
             elif cmd.startswith("mkdir "):
                 dirname = cmd[6:].strip()
                 dir_obj = get_dir(cwd)
@@ -98,13 +89,11 @@ def emulated_shell(channel, client_ip):
                         dir_obj[dirname] = {}
                     else:
                         response += f"mkdir: cannot create directory '{dirname}': File exists".encode()
-
             elif cmd.startswith("touch "):
                 filename = cmd[6:].strip()
                 dir_obj = get_dir(cwd)
                 if isinstance(dir_obj, dict):
                     dir_obj[filename] = ""
-
             elif cmd.startswith("rm "):
                 filename = cmd[3:].strip()
                 dir_obj = get_dir(cwd)
@@ -113,7 +102,6 @@ def emulated_shell(channel, client_ip):
                         del dir_obj[filename]
                     else:
                         response += f"rm: cannot remove '{filename}': No such file".encode()
-
             elif cmd.startswith("cat "):
                 filename = cmd[4:].strip()
                 dir_obj = get_dir(cwd)
@@ -125,7 +113,6 @@ def emulated_shell(channel, client_ip):
                         response += f"cat: {filename}: Is a directory".encode()
                 else:
                     response += f"cat: {filename}: No such file or directory".encode()
-
             elif ">" in cmd and cmd.startswith("echo "):
                 try:
                     parts = cmd[5:].split(">")
@@ -136,27 +123,27 @@ def emulated_shell(channel, client_ip):
                         dir_obj[fname] = msg
                 except Exception:
                     response += b"bash: syntax error near unexpected token `>'"
-
             elif cmd.startswith("echo "):
                 msg = cmd[5:].strip()
                 response += msg.encode()
-
             elif cmd == "":
-                pass 
-
+                pass
             else:
                 response += f"bash: {cmd}: command not found".encode()
 
             funnel_logger.info(f'Command "{cmd}" executed by {client_ip}')
-
             if response:
                 channel.send(response + b"\r\n")
-
             cwd_display = cwd.replace("/home/user1", "~") if cwd.startswith("/home/user1") else cwd
             prompt = prompt_template.format(cwd_display).encode()
             channel.send(prompt)
-
             command = b""
+
+        elif char == b"\x7f": 
+            if len(command) > 0:
+                command = command[:-1]
+                channel.send(b"\b \b")
+
         else:
             channel.send(char)
             command += char
@@ -180,7 +167,6 @@ def client_handle(client, addr, username, password, tarpit=False):
             return
 
         banner = "Welcome to Ubuntu 22.04 LTS!\r\n\r\n"
-
         if tarpit:
             for char in banner * 100:
                 channel.send(char)
