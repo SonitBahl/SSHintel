@@ -1,5 +1,11 @@
 # SSHintel — Lightweight SSH Honeypot
 
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
+![Last Commit](https://img.shields.io/github/last-commit/sonitbahl/SSHintel)
+![Repo Size](https://img.shields.io/github/repo-size/sonitbahl/SSHintel)
+
+
 `SSHintel` is a lightweight SSH honeypot built using Python and Paramiko. It simulates a fake Linux shell to log unauthorized access attempts, capture credentials, and analyze attacker behavior in a controlled environment.
 
 ---
@@ -112,7 +118,9 @@ SSHintel/
 ├── requirements.txt           # Python dependencies
 └── run.py                     # Script to launch honeypot
 ```
+## 📄 License
 
+This project is licensed under the [MIT License](LICENSE).
 
 
 ## 👤 Author
