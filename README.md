@@ -1,10 +1,6 @@
 # SSHintel — Lightweight SSH Honeypot
 
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
-![Last Commit](https://img.shields.io/github/last-commit/sonitbahl/SSHintel)
-![Repo Size](https://img.shields.io/github/repo-size/sonitbahl/SSHintel)
-
+&#x20; &#x20;
 
 `SSHintel` is a lightweight SSH honeypot built using Python and Paramiko. It simulates a fake Linux shell to log unauthorized access attempts, capture credentials, and analyze attacker behavior in a controlled environment.
 
@@ -70,7 +66,7 @@ If the credentials match, you’ll be dropped into the emulated shell.
 
 ---
 
-## 🧹 Optional: Clear Known Hosts (If Reconnecting)
+## 🚑 Optional: Clear Known Hosts (If Reconnecting)
 
 To remove stale SSH fingerprints:
 
@@ -114,17 +110,81 @@ SSHintel/
 │   └── notes.txt             
 │
 ├── .gitignore
+├── Dockerfile
 ├── README.md
 ├── requirements.txt           # Python dependencies
 └── run.py                     # Script to launch honeypot
 ```
+
+---
+
+## 💪 Run with Docker (Alternative Method)
+
+If you prefer to run the honeypot in a containerized environment, you can use the included Dockerfile.
+
+### 🔨 Build the Docker Image
+
+```bash
+docker build -t sshintel .
+```
+
+> This creates a Docker image named `sshintel`.
+
+---
+
+### 🚀 Run the Container
+
+```bash
+docker run -p 2222:2222 sshintel
+```
+
+This will:
+
+- Automatically generate the SSH private key at `static/server.key` (if it doesn't already exist)
+- Launch the honeypot on port `2222` with default credentials:\
+  `username: user1`, `password: pass123`
+
+---
+
+### 🔮 Test the Honeypot
+
+Open a second terminal and connect via SSH:
+
+```bash
+ssh user1@localhost -p 2222
+```
+
+You’ll be dropped into the simulated shell if the credentials match.
+
+---
+
+### 🧼 Stop and Clean Up
+
+To stop the container:
+
+```bash
+docker ps  # Find the container ID
+docker stop <container_id>
+```
+
+To remove the image:
+
+```bash
+docker rmi sshintel
+```
+
+> You can also export the image using `docker save -o sshintel.tar sshintel` and load it later with `docker load -i sshintel.tar`.
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
 
+---
 
 ## 👤 Author
 
-**Sonit Bahl**  
-🔗 [LinkedIn](https://www.linkedin.com/in/sonitbahl)  
+**Sonit Bahl**\
+🔗 [LinkedIn](https://www.linkedin.com/in/sonitbahl)\
 🔗 [Portfolio](https://sonitwebsite.vercel.app/)
