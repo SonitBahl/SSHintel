@@ -5,40 +5,14 @@ from pathlib import Path
 
 from .server import Server
 from .session import Session
+from .fs import get_dir, resolve_path
 from .logger import funnel_logger, log_event
 
 host_key_path = Path(__file__).parent.parent / 'static' / 'server.key'
 host_key = paramiko.RSAKey(filename=host_key_path)
 
-fake_fs = {
-    "home": {
-        "user1": {
-            "notes.txt": "This is a test file.",
-            "script.sh": "#!/bin/bash\necho Hello World",
-            "Documents": {},
-            "Downloads": {},
-        }
-    }
-}
-
-def resolve_path(cwd, target):
-    if target.startswith("/"):
-        return target
-    return cwd.rstrip("/") + "/" + target
-
-def get_dir(path):
-    parts = [p for p in path.strip("/").split("/") if p]
-    cur = fake_fs
-    for p in parts:
-        if isinstance(cur, dict) and p in cur:
-            cur = cur[p]
-        else:
-            return None
-    return cur
-
 def emulated_shell(channel, session):
     prompt_template = "user1@ubuntu:{}$ "
-    cwd = "/home/user1"
     cwd_display = "~"
     prompt = prompt_template.format(cwd_display).encode()
     command = b""
@@ -53,6 +27,7 @@ def emulated_shell(channel, session):
             channel.send(b"\r\n")
             cmd = command.strip().decode()
             response = b""
+            cwd = session.cwd
 
             if cmd == "exit":
                 channel.send(b"logout\r\n")
@@ -72,19 +47,19 @@ def emulated_shell(channel, session):
             elif cmd.startswith("cd "):
                 target = cmd[3:].strip()
                 new_path = "/".join(cwd.strip("/").split("/")[:-1]) if target == ".." else resolve_path(cwd, target)
-                if get_dir(new_path):
-                    cwd = new_path
+                if get_dir(new_path, session.fake_filesystem):
+                    session.cwd = new_path
                 else:
                     response += f"bash: cd: {target}: No such file or directory".encode()
             elif cmd == "ls":
-                dir_obj = get_dir(cwd)
+                dir_obj = get_dir(cwd, session.fake_filesystem)
                 if isinstance(dir_obj, dict):
                     response += "  ".join(dir_obj.keys()).encode()
                 else:
                     response += f"ls: cannot access '{cwd}': Not a directory".encode()
             elif cmd.startswith("mkdir "):
                 dirname = cmd[6:].strip()
-                dir_obj = get_dir(cwd)
+                dir_obj = get_dir(cwd, session.fake_filesystem)
                 if isinstance(dir_obj, dict):
                     if dirname not in dir_obj:
                         dir_obj[dirname] = {}
@@ -92,12 +67,12 @@ def emulated_shell(channel, session):
                         response += f"mkdir: cannot create directory '{dirname}': File exists".encode()
             elif cmd.startswith("touch "):
                 filename = cmd[6:].strip()
-                dir_obj = get_dir(cwd)
+                dir_obj = get_dir(cwd, session.fake_filesystem)
                 if isinstance(dir_obj, dict):
                     dir_obj[filename] = ""
             elif cmd.startswith("rm "):
                 filename = cmd[3:].strip()
-                dir_obj = get_dir(cwd)
+                dir_obj = get_dir(cwd, session.fake_filesystem)
                 if isinstance(dir_obj, dict):
                     if filename in dir_obj:
                         del dir_obj[filename]
@@ -105,7 +80,7 @@ def emulated_shell(channel, session):
                         response += f"rm: cannot remove '{filename}': No such file".encode()
             elif cmd.startswith("cat "):
                 filename = cmd[4:].strip()
-                dir_obj = get_dir(cwd)
+                dir_obj = get_dir(cwd, session.fake_filesystem)
                 if isinstance(dir_obj, dict) and filename in dir_obj:
                     content = dir_obj[filename]
                     if isinstance(content, str):
@@ -119,7 +94,7 @@ def emulated_shell(channel, session):
                     parts = cmd[5:].split(">")
                     msg = parts[0].strip()
                     fname = parts[1].strip()
-                    dir_obj = get_dir(cwd)
+                    dir_obj = get_dir(cwd, session.fake_filesystem)
                     if isinstance(dir_obj, dict):
                         dir_obj[fname] = msg
                 except Exception:
@@ -139,11 +114,11 @@ def emulated_shell(channel, session):
                 source_ip=session.source_ip,
                 username=session.username,
                 command=cmd,
-                cwd=cwd,
+                cwd=session.cwd,
             )
             if response:
                 channel.send(response + b"\r\n")
-            cwd_display = cwd.replace("/home/user1", "~") if cwd.startswith("/home/user1") else cwd
+            cwd_display = session.cwd.replace("/home/user1", "~") if session.cwd.startswith("/home/user1") else session.cwd
             prompt = prompt_template.format(cwd_display).encode()
             channel.send(prompt)
             command = b""

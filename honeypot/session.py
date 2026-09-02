@@ -14,6 +14,7 @@ between concurrent clients.
 import time
 from dataclasses import dataclass, field
 
+from .fs import create_filesystem
 from .logger import new_session_id, utc_now_iso
 
 AUTH_SUCCESS = 'success'
@@ -38,6 +39,10 @@ class Session:
     disconnected_at: str | None = None
     auth_result: str | None = None
     duration_seconds: float | None = None
+    # Per-session isolated state: the fake filesystem and working directory.
+    # Each Session gets its own independent copy created by ``create_filesystem``.
+    fake_filesystem: dict = field(default_factory=create_filesystem)
+    cwd: str = "/home/user1"
     _connected_mono: float = field(
         default_factory=time.monotonic, init=False, repr=False, compare=False
     )

@@ -93,6 +93,8 @@ Each JSONL event includes a UTC ISO-8601 `timestamp`, an `event_type`, a unique 
 
 Each incoming SSH connection is tracked as an independent **session** with its own `session_id`. A session records the source IP, connect/disconnect times, the authentication outcome, and the connection duration, and every event generated within that connection carries the same `session_id` (so authentication attempts, commands, and disconnects can be tied back to a single connection). Sessions are isolated per connection — no state is shared between concurrent clients.
 
+Every session also receives its **own isolated, in-memory fake filesystem** — the simulated filesystem is created fresh for each connection and cleaned up when the connection ends. Files, directories, and the working directory created or changed by one attacker are never visible to another attacker connected at the same time. The entire filesystem is simulated in Python memory and **never touches the real host filesystem**.
+
 Current `event_type` values: `connect`, `auth_attempt`, `auth_success`, `auth_failure`, `command`, `disconnect`, `tarpit`.
 
 You can extend `logger.py` to send logs to files, remote servers, or alerting systems.
@@ -109,6 +111,7 @@ SSHintel/
 │   ├── handlers.py            # Shell logic + tarpit
 │   ├── server.py              # Paramiko-based server interface
 │   ├── session.py             # Per-connection session tracking
+│   ├── fs.py                  # In-memory fake filesystem (isolated per session)
 │   ├── logger.py              # Logging setup and methods
 │   └── __pycache__/           # Compiled Python bytecode
 │
