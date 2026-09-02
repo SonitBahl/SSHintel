@@ -89,7 +89,9 @@ notepad "%USERPROFILE%\.ssh\known_hosts"
 - Shell commands are logged via `funnel_logger`
 - Structured security events are written to `log_files/events.jsonl` as **JSON Lines (JSONL)** — one valid JSON object per line
 
-Each JSONL event includes a UTC ISO-8601 `timestamp`, an `event_type`, a unique `session_id`, and the `source_ip`. Connection, authentication attempts/results, command execution, tarpit activation, and disconnects are all recorded as structured events, which lays the foundation for future session tracking and analytics.
+Each JSONL event includes a UTC ISO-8601 `timestamp`, an `event_type`, a unique `session_id`, and the `source_ip`. Connection, authentication attempts/results, command execution, tarpit activation, and disconnects are all recorded as structured events.
+
+Each incoming SSH connection is tracked as an independent **session** with its own `session_id`. A session records the source IP, connect/disconnect times, the authentication outcome, and the connection duration, and every event generated within that connection carries the same `session_id` (so authentication attempts, commands, and disconnects can be tied back to a single connection). Sessions are isolated per connection — no state is shared between concurrent clients.
 
 Current `event_type` values: `connect`, `auth_attempt`, `auth_success`, `auth_failure`, `command`, `disconnect`, `tarpit`.
 
@@ -106,6 +108,7 @@ SSHintel/
 │   ├── main.py                # CLI entrypoint
 │   ├── handlers.py            # Shell logic + tarpit
 │   ├── server.py              # Paramiko-based server interface
+│   ├── session.py             # Per-connection session tracking
 │   ├── logger.py              # Logging setup and methods
 │   └── __pycache__/           # Compiled Python bytecode
 │

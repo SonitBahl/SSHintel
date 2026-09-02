@@ -4,7 +4,8 @@ import socket
 from pathlib import Path
 
 from .server import Server
-from .logger import funnel_logger, log_event, new_session_id
+from .session import Session
+from .logger import funnel_logger, log_event
 
 host_key_path = Path(__file__).parent.parent / 'static' / 'server.key'
 host_key = paramiko.RSAKey(filename=host_key_path)
@@ -35,7 +36,7 @@ def get_dir(path):
             return None
     return cur
 
-def emulated_shell(channel, client_ip, session_id, username=None):
+def emulated_shell(channel, session):
     prompt_template = "user1@ubuntu:{}$ "
     cwd = "/home/user1"
     cwd_display = "~"
@@ -131,12 +132,12 @@ def emulated_shell(channel, client_ip, session_id, username=None):
             else:
                 response += f"bash: {cmd}: command not found".encode()
 
-            funnel_logger.info(f'Command "{cmd}" executed by {client_ip}')
+            funnel_logger.info(f'Command "{cmd}" executed by {session.source_ip}')
             log_event(
                 'command',
-                session_id=session_id,
-                source_ip=client_ip,
-                username=username,
+                session_id=session.session_id,
+                source_ip=session.source_ip,
+                username=session.username,
                 command=cmd,
                 cwd=cwd,
             )
@@ -160,15 +161,15 @@ def emulated_shell(channel, client_ip, session_id, username=None):
 
 def client_handle(client, addr, username, password, tarpit=False):
     client_ip = addr[0]
-    session_id = new_session_id()
+    session = Session(source_ip=client_ip)
     print(f"{client_ip} connected to server.")
-    log_event('connect', session_id=session_id, source_ip=client_ip)
+    log_event('connect', session_id=session.session_id, source_ip=session.source_ip)
     try:
         transport = paramiko.Transport(client)
         transport.local_version = "SSH-2.0-MySSHServer_1.0"
         transport.add_server_key(host_key)
 
-        server = Server(client_ip, username, password, session_id=session_id)
+        server = Server(client_ip, username, password, session=session)
         transport.start_server(server=server)
         channel = transport.accept(100)
 
@@ -178,14 +179,14 @@ def client_handle(client, addr, username, password, tarpit=False):
 
         banner = "Welcome to Ubuntu 22.04 LTS!\r\n\r\n"
         if tarpit:
-            log_event('tarpit', session_id=session_id, source_ip=client_ip)
+            log_event('tarpit', session_id=session.session_id, source_ip=session.source_ip)
             for char in banner * 100:
                 channel.send(char)
                 time.sleep(8)
         else:
             channel.send(banner)
 
-        emulated_shell(channel, client_ip, session_id, username=server.auth_username)
+        emulated_shell(channel, session)
 
     except Exception as e:
         print("!!! Exception in client handler !!!")
@@ -196,4 +197,14 @@ def client_handle(client, addr, username, password, tarpit=False):
         except Exception:
             pass
         client.close()
-        log_event('disconnect', session_id=session_id, source_ip=client_ip)
+        # Finalize exactly once, then emit the disconnect event. ``finalize()``
+        # is idempotent so we never emit more than one disconnect per session.
+        session.finalize()
+        log_event(
+            'disconnect',
+            session_id=session.session_id,
+            source_ip=session.source_ip,
+            username=session.username,
+            auth_result=session.auth_result,
+            duration_seconds=session.duration_seconds,
+        )
