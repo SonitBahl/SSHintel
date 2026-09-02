@@ -87,6 +87,11 @@ notepad "%USERPROFILE%\.ssh\known_hosts"
 
 - Credentials are logged to `creds_logger`
 - Shell commands are logged via `funnel_logger`
+- Structured security events are written to `log_files/events.jsonl` as **JSON Lines (JSONL)** — one valid JSON object per line
+
+Each JSONL event includes a UTC ISO-8601 `timestamp`, an `event_type`, a unique `session_id`, and the `source_ip`. Connection, authentication attempts/results, command execution, tarpit activation, and disconnects are all recorded as structured events, which lays the foundation for future session tracking and analytics.
+
+Current `event_type` values: `connect`, `auth_attempt`, `auth_success`, `auth_failure`, `command`, `disconnect`, `tarpit`.
 
 You can extend `logger.py` to send logs to files, remote servers, or alerting systems.
 
@@ -104,10 +109,10 @@ SSHintel/
 │   ├── logger.py              # Logging setup and methods
 │   └── __pycache__/           # Compiled Python bytecode
 │
-├── log_files/                 # Logs for credentials and commands
+├── log_files/                 # Logs for credentials, commands, and events
 │   ├── creds_audits.log
 │   ├── cmd_audits.log
-│   └── cmd_audits.log.1
+│   └── events.jsonl           # Structured JSONL security events
 │
 ├── static/                    # SSH key and dummy files
 │   ├── server.key             # Private host key

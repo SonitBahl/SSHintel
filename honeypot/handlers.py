@@ -4,7 +4,7 @@ import socket
 from pathlib import Path
 
 from .server import Server
-from .logger import funnel_logger
+from .logger import funnel_logger, log_event, new_session_id
 
 host_key_path = Path(__file__).parent.parent / 'static' / 'server.key'
 host_key = paramiko.RSAKey(filename=host_key_path)
@@ -35,7 +35,7 @@ def get_dir(path):
             return None
     return cur
 
-def emulated_shell(channel, client_ip):
+def emulated_shell(channel, client_ip, session_id, username=None):
     prompt_template = "user1@ubuntu:{}$ "
     cwd = "/home/user1"
     cwd_display = "~"
@@ -132,6 +132,14 @@ def emulated_shell(channel, client_ip):
                 response += f"bash: {cmd}: command not found".encode()
 
             funnel_logger.info(f'Command "{cmd}" executed by {client_ip}')
+            log_event(
+                'command',
+                session_id=session_id,
+                source_ip=client_ip,
+                username=username,
+                command=cmd,
+                cwd=cwd,
+            )
             if response:
                 channel.send(response + b"\r\n")
             cwd_display = cwd.replace("/home/user1", "~") if cwd.startswith("/home/user1") else cwd
@@ -152,13 +160,15 @@ def emulated_shell(channel, client_ip):
 
 def client_handle(client, addr, username, password, tarpit=False):
     client_ip = addr[0]
+    session_id = new_session_id()
     print(f"{client_ip} connected to server.")
+    log_event('connect', session_id=session_id, source_ip=client_ip)
     try:
         transport = paramiko.Transport(client)
         transport.local_version = "SSH-2.0-MySSHServer_1.0"
         transport.add_server_key(host_key)
 
-        server = Server(client_ip, username, password)
+        server = Server(client_ip, username, password, session_id=session_id)
         transport.start_server(server=server)
         channel = transport.accept(100)
 
@@ -168,13 +178,14 @@ def client_handle(client, addr, username, password, tarpit=False):
 
         banner = "Welcome to Ubuntu 22.04 LTS!\r\n\r\n"
         if tarpit:
+            log_event('tarpit', session_id=session_id, source_ip=client_ip)
             for char in banner * 100:
                 channel.send(char)
                 time.sleep(8)
         else:
             channel.send(banner)
 
-        emulated_shell(channel, client_ip)
+        emulated_shell(channel, client_ip, session_id, username=server.auth_username)
 
     except Exception as e:
         print("!!! Exception in client handler !!!")
@@ -185,3 +196,4 @@ def client_handle(client, addr, username, password, tarpit=False):
         except Exception:
             pass
         client.close()
+        log_event('disconnect', session_id=session_id, source_ip=client_ip)
