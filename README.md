@@ -57,6 +57,27 @@ To enable tarpit mode:
 python run.py --port 2222 --username user1 --password pass123 --tarpit
 ```
 
+## 🛡️ Connection limits & timeouts
+
+SSHintel guards against resource exhaustion from many concurrent connections or connections kept alive indefinitely. These are configurable via the CLI:
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--max-connections` | `50` | Maximum simultaneous active connections; extra connections are rejected and logged as a `connection_rejected` event |
+| `--auth-timeout` | `60` (s) | Time allowed to complete the SSH handshake/authentication; stalled clients are disconnected |
+| `--session-idle-timeout` | `300` (s) | Inactivity timeout for an authenticated shell; an idle session is ended, but an actively-typing attacker is never killed |
+
+Example:
+
+```bash
+python run.py --port 2222 --username user1 --password pass123 \
+  --max-connections 25 --auth-timeout 30 --session-idle-timeout 300
+```
+
+When too many connections are open, the extra connection is closed immediately and a `connection_rejected` security event (with `reason: connection_limit`) is written to the JSONL log. A stalled authentication is recorded as a disconnect with `reason: auth_timeout`; an idle shell ends with `reason: idle_timeout`.
+
+> Tarpit mode intentionally sends output slowly to keep an attacker engaged, so the tarpit banner loop is not subject to the inactivity timeout — but tarpit sessions *do* count against the connection limit.
+
 ---
 
 ## 🔐 Testing from Another Terminal
@@ -112,6 +133,7 @@ SSHintel/
 │   ├── server.py              # Paramiko-based server interface
 │   ├── session.py             # Per-connection session tracking
 │   ├── fs.py                  # In-memory fake filesystem (isolated per session)
+│   ├── limits.py              # Thread-safe concurrent connection limiting
 │   ├── logger.py              # Logging setup and methods
 │   └── __pycache__/           # Compiled Python bytecode
 │

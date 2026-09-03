@@ -11,15 +11,24 @@ from .logger import funnel_logger, log_event
 host_key_path = Path(__file__).parent.parent / 'static' / 'server.key'
 host_key = paramiko.RSAKey(filename=host_key_path)
 
-def emulated_shell(channel, session):
+def emulated_shell(channel, session, idle_timeout=300):
     prompt_template = "user1@ubuntu:{}$ "
     cwd_display = "~"
     prompt = prompt_template.format(cwd_display).encode()
     command = b""
+    # An inactivity timeout: channel.recv() raises socket.timeout if no data
+    # arrives within ``idle_timeout`` seconds. Because the countdown restarts on
+    # every successful recv(), an actively-typing attacker is never killed.
+    if idle_timeout and idle_timeout > 0:
+        channel.settimeout(idle_timeout)
     channel.send(prompt)
 
     while True:
-        char = channel.recv(1)
+        try:
+            char = channel.recv(1)
+        except socket.timeout:
+            session.disconnect_reason = 'idle_timeout'
+            break
         if not char:
             break
 
@@ -134,23 +143,33 @@ def emulated_shell(channel, session):
 
     channel.close()
 
-def client_handle(client, addr, username, password, tarpit=False):
+def client_handle(client, addr, username, password, tarpit=False,
+                  auth_timeout=60, session_idle_timeout=300):
     client_ip = addr[0]
     session = Session(source_ip=client_ip)
     print(f"{client_ip} connected to server.")
     log_event('connect', session_id=session.session_id, source_ip=session.source_ip)
+    in_auth_phase = True
     try:
+        # Bound the SSH handshake + authentication phase so a client that
+        # connects but never completes auth cannot hold a socket forever.
+        client.settimeout(auth_timeout)
         transport = paramiko.Transport(client)
         transport.local_version = "SSH-2.0-MySSHServer_1.0"
         transport.add_server_key(host_key)
 
         server = Server(client_ip, username, password, session=session)
         transport.start_server(server=server)
-        channel = transport.accept(100)
+        channel = transport.accept(auth_timeout)
 
         if channel is None:
             print("No channel was opened.")
+            session.disconnect_reason = 'auth_timeout'
             return
+        # Handshake is done; clear the socket-level timeout. The shell applies
+        # its own per-recv inactivity timeout via the channel.
+        client.settimeout(None)
+        in_auth_phase = False
 
         banner = "Welcome to Ubuntu 22.04 LTS!\r\n\r\n"
         if tarpit:
@@ -161,9 +180,15 @@ def client_handle(client, addr, username, password, tarpit=False):
         else:
             channel.send(banner)
 
-        emulated_shell(channel, session)
+        emulated_shell(channel, session, idle_timeout=session_idle_timeout)
 
+    except socket.timeout:
+        if in_auth_phase:
+            session.disconnect_reason = 'auth_timeout'
+        print(f"{client_ip} disconnected during SSH handshake/auth (timeout).")
     except Exception as e:
+        if in_auth_phase:
+            session.disconnect_reason = 'auth_timeout'
         print("!!! Exception in client handler !!!")
         print(e)
     finally:
@@ -182,4 +207,5 @@ def client_handle(client, addr, username, password, tarpit=False):
             username=session.username,
             auth_result=session.auth_result,
             duration_seconds=session.duration_seconds,
+            reason=session.disconnect_reason,
         )
