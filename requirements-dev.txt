@@ -1,0 +1,8 @@
+# Development and test dependencies for SSHintel.
+# Install with: pip install -r requirements-dev.txt
+#
+# These are not required to run the honeypot itself (see requirements.txt).
+# They are used for running the test suite and generating coverage reports.
+
+pytest>=7.0
+pytest-cov>=4.0

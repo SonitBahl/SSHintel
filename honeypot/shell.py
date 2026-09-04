@@ -80,8 +80,10 @@ def _cmd_cd(shell, args):
         target = args[0]
     new_path = shell._resolve(target)
     node = _node(shell, new_path)
-    if node is None or not isinstance(node, dict):
+    if node is None:
         return f"bash: cd: {target}: No such file or directory"
+    if not isinstance(node, dict):
+        return f"bash: cd: {target}: Not a directory"
     shell.session.cwd = new_path
     return ""
 
@@ -110,12 +112,15 @@ def _cmd_mkdir(shell, args):
     flags, positionals = _flag_tokens(args)
     if not positionals:
         return "mkdir: missing operand\nTry 'mkdir --help' for more information."
-    node = _node(shell, shell.session.cwd)
-    for name in positionals:
-        if isinstance(node, dict):
-            if name in node:
-                return f"mkdir: cannot create directory '{name}': File exists"
-            node[name] = {}
+    for target in positionals:
+        abs_path = shell._resolve(target)
+        parent, base = split_path(abs_path)
+        node = _node(shell, parent)
+        if node is None or not isinstance(node, dict):
+            return f"mkdir: cannot create directory '{target}': No such file or directory"
+        if base in node:
+            return f"mkdir: cannot create directory '{target}': File exists"
+        node[base] = {}
     return ""
 
 
@@ -334,6 +339,8 @@ def _cmd_grep(shell, args):
                     out.append(f"{f}:{line}")
                 else:
                     out.append(line)
+    if not out:
+        return ""
     return "\n".join(out)
 
 
