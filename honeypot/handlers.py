@@ -5,23 +5,46 @@ from pathlib import Path
 
 from .server import Server
 from .session import Session
-from .fs import get_dir, resolve_path
+from .shell import FakeShell
 from .logger import funnel_logger, log_event
 
 host_key_path = Path(__file__).parent.parent / 'static' / 'server.key'
-host_key = paramiko.RSAKey(filename=host_key_path)
+
+def _load_or_generate_host_key(path: Path) -> paramiko.RSAKey:
+    """Load existing host key, or generate a new one if missing/corrupt.
+    
+    Generating the key programmatically (instead of relying on ssh-keygen)
+    ensures the honeypot starts without user interaction and without
+    accidentally creating an encrypted key file.
+    """
+    if path.exists():
+        try:
+            return paramiko.RSAKey(filename=str(path))
+        except paramiko.ssh_exception.PasswordRequiredException:
+            # Key is encrypted; regenerate without passphrase
+            pass
+        except Exception:
+            # Corrupt or unreadable key; regenerate
+            pass
+    
+    # Generate a new 2048-bit RSA key without passphrase
+    key = paramiko.RSAKey.generate(2048)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key.write_private_key_file(str(path))
+    return key
+
+host_key = _load_or_generate_host_key(host_key_path)
 
 def emulated_shell(channel, session, idle_timeout=300):
     prompt_template = "user1@ubuntu:{}$ "
-    cwd_display = "~"
-    prompt = prompt_template.format(cwd_display).encode()
+    shell = FakeShell(session)
     command = b""
     # An inactivity timeout: channel.recv() raises socket.timeout if no data
     # arrives within ``idle_timeout`` seconds. Because the countdown restarts on
     # every successful recv(), an actively-typing attacker is never killed.
     if idle_timeout and idle_timeout > 0:
         channel.settimeout(idle_timeout)
-    channel.send(prompt)
+    channel.send(_prompt(prompt_template, session.cwd))
 
     while True:
         try:
@@ -34,114 +57,49 @@ def emulated_shell(channel, session, idle_timeout=300):
 
         if char == b"\r":
             channel.send(b"\r\n")
-            cmd = command.strip().decode()
-            response = b""
-            cwd = session.cwd
+            cmd_line = command.decode(errors="replace")
+            command = b""
 
-            if cmd == "exit":
+            # Run through the fake shell. Any Python exception escaping a
+            # handler must become a simulated shell error, never crash the
+            # SSH session.
+            try:
+                output = shell.execute(cmd_line)
+            except Exception:
+                output = "bash: internal error while handling command"
+                print(f"!!! Shell handler raised for {cmd_line!r}")
+
+            if shell.exited:
                 channel.send(b"logout\r\n")
                 break
-            elif cmd == "pwd":
-                response += cwd.encode()
-            elif cmd == "whoami":
-                response += b"user1"
-            elif cmd == "hostname":
-                response += b"ubuntu"
-            elif cmd == "uname -a":
-                response += b"Linux ubuntu 5.15.0-50-generic #56~20.04 SMP x86_64 GNU/Linux"
-            elif cmd == "id":
-                response += b"uid=1001(user1) gid=1001(user1) groups=1001(user1)"
-            elif cmd == "clear":
-                response += b"\033[2J\033[H"
-            elif cmd.startswith("cd "):
-                target = cmd[3:].strip()
-                new_path = "/".join(cwd.strip("/").split("/")[:-1]) if target == ".." else resolve_path(cwd, target)
-                if get_dir(new_path, session.fake_filesystem):
-                    session.cwd = new_path
-                else:
-                    response += f"bash: cd: {target}: No such file or directory".encode()
-            elif cmd == "ls":
-                dir_obj = get_dir(cwd, session.fake_filesystem)
-                if isinstance(dir_obj, dict):
-                    response += "  ".join(dir_obj.keys()).encode()
-                else:
-                    response += f"ls: cannot access '{cwd}': Not a directory".encode()
-            elif cmd.startswith("mkdir "):
-                dirname = cmd[6:].strip()
-                dir_obj = get_dir(cwd, session.fake_filesystem)
-                if isinstance(dir_obj, dict):
-                    if dirname not in dir_obj:
-                        dir_obj[dirname] = {}
-                    else:
-                        response += f"mkdir: cannot create directory '{dirname}': File exists".encode()
-            elif cmd.startswith("touch "):
-                filename = cmd[6:].strip()
-                dir_obj = get_dir(cwd, session.fake_filesystem)
-                if isinstance(dir_obj, dict):
-                    dir_obj[filename] = ""
-            elif cmd.startswith("rm "):
-                filename = cmd[3:].strip()
-                dir_obj = get_dir(cwd, session.fake_filesystem)
-                if isinstance(dir_obj, dict):
-                    if filename in dir_obj:
-                        del dir_obj[filename]
-                    else:
-                        response += f"rm: cannot remove '{filename}': No such file".encode()
-            elif cmd.startswith("cat "):
-                filename = cmd[4:].strip()
-                dir_obj = get_dir(cwd, session.fake_filesystem)
-                if isinstance(dir_obj, dict) and filename in dir_obj:
-                    content = dir_obj[filename]
-                    if isinstance(content, str):
-                        response += content.encode()
-                    else:
-                        response += f"cat: {filename}: Is a directory".encode()
-                else:
-                    response += f"cat: {filename}: No such file or directory".encode()
-            elif ">" in cmd and cmd.startswith("echo "):
-                try:
-                    parts = cmd[5:].split(">")
-                    msg = parts[0].strip()
-                    fname = parts[1].strip()
-                    dir_obj = get_dir(cwd, session.fake_filesystem)
-                    if isinstance(dir_obj, dict):
-                        dir_obj[fname] = msg
-                except Exception:
-                    response += b"bash: syntax error near unexpected token `>'"
-            elif cmd.startswith("echo "):
-                msg = cmd[5:].strip()
-                response += msg.encode()
-            elif cmd == "":
-                pass
-            else:
-                response += f"bash: {cmd}: command not found".encode()
 
-            funnel_logger.info(f'Command "{cmd}" executed by {session.source_ip}')
+            funnel_logger.info(f'Command "{cmd_line}" executed by {session.source_ip}')
             log_event(
                 'command',
                 session_id=session.session_id,
                 source_ip=session.source_ip,
                 username=session.username,
-                command=cmd,
+                command=cmd_line,
                 cwd=session.cwd,
             )
-            if response:
-                channel.send(response + b"\r\n")
-            cwd_display = session.cwd.replace("/home/user1", "~") if session.cwd.startswith("/home/user1") else session.cwd
-            prompt = prompt_template.format(cwd_display).encode()
-            channel.send(prompt)
-            command = b""
+            if output:
+                channel.send(output.encode() + b"\r\n" if not output.endswith("\n") else output.encode())
+            channel.send(_prompt(prompt_template, session.cwd))
 
-        elif char == b"\x7f": 
+        elif char == b"\x7f":
             if len(command) > 0:
                 command = command[:-1]
                 channel.send(b"\b \b")
-
         else:
             channel.send(char)
             command += char
 
     channel.close()
+
+
+def _prompt(template, cwd):
+    cwd_display = cwd.replace("/home/user1", "~") if cwd.startswith("/home/user1") else cwd
+    return template.format(cwd_display).encode()
 
 def client_handle(client, addr, username, password, tarpit=False,
                   auth_timeout=60, session_idle_timeout=300):

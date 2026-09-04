@@ -14,10 +14,13 @@
 ## 🔧 Features
 
 - Logs SSH login attempts with IP, username, and password
-- Emulates a minimal interactive Linux shell
-- Supports basic commands (`ls`, `cd`, `pwd`, `cat`, `echo`, etc.)
+- Provides a **simulated** Linux shell (a fake, in-memory environment)
+- Supports a broad set of reconnaissance and navigation commands (`ls`, `cd`, `pwd`, `cat`, `echo`, `grep`, `find`, `tree`, `head`, `tail`, `wc`, `stat`, `ps`, `df`, `free`, `env`, `id`, `whoami`, etc.)
 - Optional `--tarpit` mode to slow down attackers with delayed output
-- Fake filesystem with file creation and reading support
+- Per-session isolated fake filesystem with file creation and reading support
+- **Everything is simulated** — commands never execute on the host, never access the real filesystem, and make no network requests.
+
+> SSHintel is **not** a full Bash/Linux shell. It simulates a believable subset of common commands to gather attacker telemetry. Commands are dispatched by a lightweight registry; adding a command means adding a small handler function.
 
 ---
 
@@ -133,6 +136,7 @@ SSHintel/
 │   ├── server.py              # Paramiko-based server interface
 │   ├── session.py             # Per-connection session tracking
 │   ├── fs.py                  # In-memory fake filesystem (isolated per session)
+│   ├── shell.py               # Fake shell: command registry + dispatcher + handlers
 │   ├── limits.py              # Thread-safe concurrent connection limiting
 │   ├── logger.py              # Logging setup and methods
 │   └── __pycache__/           # Compiled Python bytecode
