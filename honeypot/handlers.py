@@ -6,7 +6,7 @@ from pathlib import Path
 from .server import Server
 from .session import Session
 from .shell import FakeShell
-from .logger import funnel_logger, log_event
+from .logger import funnel_logger, log_event, record_session_connect, record_session_finalize
 
 host_key_path = Path(__file__).parent.parent / 'static' / 'server.key'
 
@@ -107,6 +107,7 @@ def client_handle(client, addr, username, password, tarpit=False,
     session = Session(source_ip=client_ip)
     print(f"{client_ip} connected to server.")
     log_event('connect', session_id=session.session_id, source_ip=session.source_ip)
+    record_session_connect(session.session_id, session.source_ip, session.connected_at)
     in_auth_phase = True
     try:
         # Bound the SSH handshake + authentication phase so a client that
@@ -166,4 +167,12 @@ def client_handle(client, addr, username, password, tarpit=False,
             auth_result=session.auth_result,
             duration_seconds=session.duration_seconds,
             reason=session.disconnect_reason,
+        )
+        record_session_finalize(
+            session.session_id,
+            session.username,
+            session.disconnected_at,
+            session.duration_seconds,
+            session.auth_result,
+            session.disconnect_reason,
         )

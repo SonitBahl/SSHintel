@@ -7,6 +7,12 @@ __pycache__/
 log_files/*
 !log_files/.gitkeep
 
+# SQLite telemetry databases (runtime data)
+data/
+*.db
+*.db-shm
+*.db-wal
+
 # Generic log files
 *.log
 

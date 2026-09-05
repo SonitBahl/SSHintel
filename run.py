@@ -1,24 +1,50 @@
 from honeypot.main import honeypot
+from honeypot.logger import set_telemetry_store
+from honeypot.telemetry_store import TelemetryStore
 import argparse
+import sys
 
-parser = argparse.ArgumentParser(description="SSH Honeypot CLI")
-parser.add_argument('--host', default='0.0.0.0')
-parser.add_argument('--port', type=int, default=2222)
-parser.add_argument('--username')
-parser.add_argument('--password')
-parser.add_argument('--tarpit', action='store_true')
-parser.add_argument('--max-connections', type=int, default=50,
-                    help='maximum simultaneous active connections (default: 50)')
-parser.add_argument('--auth-timeout', type=int, default=60,
-                    help='seconds allowed for SSH handshake/authentication (default: 60)')
-parser.add_argument('--session-idle-timeout', type=int, default=300,
-                    help='seconds of inactivity before an authenticated session ends (default: 300)')
 
-args = parser.parse_args()
+def cmd_stats(store):
+    """Print summary statistics from the telemetry store."""
+    print("=== SSHintel Telemetry Summary ===")
+    print(f"  Sessions:          {store.count_sessions()}")
+    print(f"  Unique IPs:        {store.unique_ips()}")
+    print(f"  Total events:      {store.count_events()}")
+    print(f"  Auth attempts:     {store.total_auth_attempts()}")
+    print(f"  Auth successes:    {store.successful_auths()}")
+    print(f"  Auth failures:     {store.failed_auth_attempts()}")
+    print(f"  Commands executed: {store.total_commands()}")
 
-honeypot(
-    args.host, args.port, args.username, args.password, args.tarpit,
-    max_connections=args.max_connections,
-    auth_timeout=args.auth_timeout,
-    session_idle_timeout=args.session_idle_timeout,
-)
+
+def cmd_top_commands(store, limit=10):
+    """Print the most frequently executed commands."""
+    rows = store.top_commands(limit=limit)
+    print(f"=== Top {len(rows)} Commands ===")
+    if not rows:
+        print("  (no commands recorded)")
+        return
+    for i, row in enumerate(rows, 1):
+        print(f"  {i:3d}. {row['command']:<20s} ({row['count']}x)")
+
+
+def cmd_top_usernames(store, limit=10):
+    """Print the most frequently attempted usernames."""
+    rows = store.top_usernames(limit=limit)
+    print(f"=== Top {len(rows)} Usernames ===")
+    if not rows:
+        print("  (no usernames recorded)")
+        return
+    for i, row in enumerate(rows, 1):
+        print(f"  {i:3d}. {row['username']:<20s} ({row['count']}x)")
+
+
+def cmd_top_ips(store, limit=10):
+    """Print the most active source IPs."""
+    rows = store.top_source_ips(limit=limit)
+    print(f"=== Top {len(rows)} Source IPs ===")
+    if not rows:
+        print("  (no IPs recorded)")
+        return
+    for i, row in enumerate(rows, 1):
+        print(f"  {i:3d}. {row['source_ip']:<20s} ({row['count']} events)")

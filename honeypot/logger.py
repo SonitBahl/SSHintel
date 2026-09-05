@@ -9,6 +9,10 @@ base_dir = Path(__file__).parent.parent
 log_dir = base_dir / 'log_files'
 log_dir.mkdir(exist_ok=True)
 
+# Global SQLite telemetry store, set once at startup when SQLite is enabled.
+# Remains None when telemetry is disabled, so all no-op checks short-circuit.
+_telemetry_store = None
+
 creds_log_path = log_dir / 'creds_audits.log'
 cmd_log_path = log_dir / 'cmd_audits.log'
 events_log_path = log_dir / 'events.jsonl'
@@ -93,5 +97,32 @@ def log_event(event_type, session_id=None, source_ip=None, **extra):
             event_type, session_id=session_id, source_ip=source_ip, **extra
         )
         event_logger.info(serialize_event(event))
+        # Mirror the event into the SQLite telemetry store if one is configured.
+        if _telemetry_store is not None and _telemetry_store.is_open:
+            _telemetry_store.log_event(event)
     except Exception as exc:
         print(f"!!! Failed to write security event ({event_type}): {exc}")
+
+
+def set_telemetry_store(store):
+    """Set the global SQLite telemetry store used by all event logging.
+
+    Pass ``None`` to disable SQLite persistence.
+    """
+    global _telemetry_store
+    _telemetry_store = store
+
+
+def record_session_connect(session_id, source_ip, connected_at):
+    """Record the start of a new session in the telemetry store (no-op if disabled)."""
+    if _telemetry_store is not None and _telemetry_store.is_open:
+        _telemetry_store.record_session_connect(session_id, source_ip, connected_at)
+
+
+def record_session_finalize(session_id, username, ended_at, duration,
+                            status, disconnect_reason):
+    """Record a session's final state in the telemetry store (no-op if disabled)."""
+    if _telemetry_store is not None and _telemetry_store.is_open:
+        _telemetry_store.record_session_finalize(
+            session_id, username, ended_at, duration, status, disconnect_reason
+        )
