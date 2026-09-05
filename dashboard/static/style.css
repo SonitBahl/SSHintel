@@ -1,0 +1,218 @@
+/* SSHintel dashboard — dark security-monitoring theme */
+:root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d29922;
+    --purple: #bc8cff;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 20px;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+header h1 {
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.status {
+    font-size: 13px;
+    color: var(--green);
+    font-weight: 500;
+}
+
+/* KPI cards */
+.metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+}
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    text-align: center;
+}
+
+.card-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 4px;
+}
+
+.card-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Sections */
+section {
+    margin-bottom: 28px;
+}
+
+section h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+}
+
+/* Activity chart */
+#activity-chart {
+    width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+/* Two-column grid */
+.grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 768px) {
+    .grid-2 { grid-template-columns: 1fr; }
+}
+
+/* Rankings */
+.ranking {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+}
+
+.rank-row {
+    display: flex;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+    font-size: 13px;
+}
+
+.rank-row:last-child { border-bottom: none; }
+
+.rank-num {
+    width: 28px;
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.rank-name {
+    flex: 1;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.rank-count {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 12px;
+    min-width: 40px;
+    text-align: right;
+}
+
+.empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 16px;
+}
+
+/* Recent activity table */
+#recent-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13px;
+}
+
+#recent-table th {
+    text-align: left;
+    padding: 10px 14px;
+    background: #1c2128;
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+}
+
+#recent-table td {
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+}
+
+#recent-table tr:last-child td { border-bottom: none; }
+
+.event-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.event-connect { background: rgba(88, 166, 255, 0.15); color: var(--accent); }
+.event-auth_attempt { background: rgba(210, 153, 34, 0.15); color: var(--orange); }
+.event-auth_success { background: rgba(63, 185, 80, 0.15); color: var(--green); }
+.event-auth_failure { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+.event-command { background: rgba(188, 140, 255, 0.15); color: var(--purple); }
+.event-disconnect { background: rgba(139, 148, 158, 0.15); color: var(--text-muted); }
+.event-connection_rejected { background: rgba(248, 81, 73, 0.15); color: var(--red); }
+.event-tarpit { background: rgba(210, 153, 34, 0.15); color: var(--orange); }
+
+footer {
+    text-align: center;
+    padding-top: 16px;
+    color: var(--text-muted);
+    font-size: 12px;
+}

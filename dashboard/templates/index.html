@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSHintel — Security Telemetry</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SSHintel</h1>
+            <span class="status">● Monitoring</span>
+        </header>
+
+        <section id="metrics" class="metrics">
+            <div class="card" id="metric-sessions">
+                <div class="card-value">—</div>
+                <div class="card-label">Sessions</div>
+            </div>
+            <div class="card" id="metric-unique-ips">
+                <div class="card-value">—</div>
+                <div class="card-label">Unique IPs</div>
+            </div>
+            <div class="card" id="metric-auth-attempts">
+                <div class="card-value">—</div>
+                <div class="card-label">Auth Attempts</div>
+            </div>
+            <div class="card" id="metric-auth-successes">
+                <div class="card-value">—</div>
+                <div class="card-label">Auth Successes</div>
+            </div>
+            <div class="card" id="metric-commands">
+                <div class="card-value">—</div>
+                <div class="card-label">Commands</div>
+            </div>
+        </section>
+
+        <section id="activity-section">
+            <h2>Connection Activity</h2>
+            <canvas id="activity-chart" height="160"></canvas>
+        </section>
+
+        <div class="grid-2">
+            <section id="top-commands-section">
+                <h2>Top Commands</h2>
+                <div id="top-commands" class="ranking">
+                    <div class="empty">No data</div>
+                </div>
+            </section>
+
+            <section id="top-usernames-section">
+                <h2>Targeted Usernames</h2>
+                <div id="top-usernames" class="ranking">
+                    <div class="empty">No data</div>
+                </div>
+            </section>
+        </div>
+
+        <section id="top-ips-section">
+            <h2>Top Source IPs</h2>
+            <div id="top-ips" class="ranking">
+                <div class="empty">No data</div>
+            </div>
+        </section>
+
+        <section id="recent-section">
+            <h2>Recent Activity</h2>
+            <table id="recent-table">
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Event</th>
+                        <th>Source IP</th>
+                        <th>Username</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody id="recent-body">
+                    <tr><td colspan="5" class="empty">No telemetry yet</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <footer>
+            <span id="last-updated">Loading…</span>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='dashboard.js') }}"></script>
+</body>
+</html>

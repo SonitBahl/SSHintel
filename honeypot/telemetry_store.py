@@ -295,6 +295,22 @@ class TelemetryStore:
                 "ended_at", "duration", "status", "disconnect_reason"]
         return [dict(zip(cols, r)) for r in rows]
 
+    def activity_by_hour(self, hours=24):
+        """Return event counts grouped by hour for the activity chart.
+
+        Returns a list of {"hour": "YYYY-MM-DD HH:00", "count": N} dicts,
+        oldest first, covering the last ``hours`` hours.
+        """
+        rows = self._query_all(
+            "SELECT strftime('%Y-%m-%d %H:00', timestamp) AS hour, "
+            "COUNT(*) AS cnt "
+            "FROM events "
+            "WHERE timestamp >= datetime('now', ?) "
+            "GROUP BY hour ORDER BY hour ASC",
+            (f"-{hours} hours",),
+        )
+        return [{"hour": r[0], "count": r[1]} for r in rows]
+
     # ---- Internal helpers ----
 
     def _query_scalar(self, sql, params=()):

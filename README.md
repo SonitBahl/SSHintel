@@ -18,6 +18,7 @@
 - Supports a broad set of reconnaissance and navigation commands (`ls`, `cd`, `pwd`, `cat`, `echo`, `grep`, `find`, `tree`, `head`, `tail`, `wc`, `stat`, `ps`, `df`, `free`, `env`, `id`, `whoami`, etc.)
 - Optional `--tarpit` mode to slow down attackers with delayed output
 - Per-session isolated fake filesystem with file creation and reading support
+- **Local web dashboard** for visualizing captured security telemetry (sessions, commands, auth attempts, top attackers)
 - **Everything is simulated** — commands never execute on the host, never access the real filesystem, and make no network requests.
 
 > SSHintel is **not** a full Bash/Linux shell. It simulates a believable subset of common commands to gather attacker telemetry. Commands are dispatched by a lightweight registry; adding a command means adding a small handler function.
@@ -80,6 +81,48 @@ python run.py --port 2222 --username user1 --password pass123 \
 When too many connections are open, the extra connection is closed immediately and a `connection_rejected` security event (with `reason: connection_limit`) is written to the JSONL log. A stalled authentication is recorded as a disconnect with `reason: auth_timeout`; an idle shell ends with `reason: idle_timeout`.
 
 > Tarpit mode intentionally sends output slowly to keep an attacker engaged, so the tarpit banner loop is not subject to the inactivity timeout — but tarpit sessions *do* count against the connection limit.
+
+---
+
+## 📊 Dashboard
+
+SSHintel includes a local web dashboard that visualizes the security telemetry stored in SQLite.
+
+### Start the dashboard
+
+```bash
+python run.py dashboard
+```
+
+Then open `http://localhost:5000` in your browser.
+
+> The dashboard reads from the SQLite database at `data/sshintel.db` by default. Start the honeypot first so telemetry is being captured, then launch the dashboard to watch it populate.
+
+### What it displays
+
+- **KPI cards** — total sessions, unique source IPs, authentication attempts, successful/failed authentications, and commands executed
+- **Activity chart** — connections over time, grouped by hour
+- **Top commands** — the most frequently run attacker commands
+- **Targeted usernames** — which usernames attackers are trying
+- **Recent activity** — the latest telemetry events in a searchable table
+
+### Example workflow
+
+```bash
+# Terminal 1: start the honeypot
+python run.py --port 2222 --username user1 --password pass123
+
+# Terminal 2: start the dashboard
+python run.py dashboard
+
+# Terminal 3: simulate an attacker
+ssh user1@localhost -p 2222
+# (run some commands, then exit)
+```
+
+Then open `http://localhost:5000` to inspect the captured activity.
+
+> The dashboard does **not** update live yet — refresh the page to see new telemetry. JSONL remains the raw source of truth; SQLite is a queryable derived store. Passwords are never displayed in the UI.
 
 ---
 
