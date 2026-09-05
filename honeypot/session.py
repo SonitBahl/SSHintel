@@ -11,6 +11,8 @@ its own independent Session instance, so no global mutable state is shared
 between concurrent clients.
 """
 
+from __future__ import annotations
+
 import time
 from dataclasses import dataclass, field
 

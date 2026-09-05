@@ -18,3 +18,9 @@ venv/
 # SSH host keys generated at runtime
 static/server.key
 static/server.key.pub
+
+# Test / coverage artifacts
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
