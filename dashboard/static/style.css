@@ -210,6 +210,110 @@ section h2 {
 .event-connection_rejected { background: rgba(248, 81, 73, 0.15); color: var(--red); }
 .event-tarpit { background: rgba(210, 153, 34, 0.15); color: var(--orange); }
 
+/* Session link in dashboard */
+.session-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+}
+.session-link:hover { text-decoration: underline; }
+
+/* Breadcrumb navigation */
+.breadcrumb {
+    margin-bottom: 20px;
+}
+.breadcrumb a {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 14px;
+}
+.breadcrumb a:hover { text-decoration: underline; }
+
+/* Session summary */
+.session-summary { margin-bottom: 28px; }
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+.summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.summary-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.summary-value {
+    font-size: 13px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    word-break: break-all;
+}
+.session-id-full { font-size: 11px; }
+.auth-success { color: var(--green); }
+.auth-failure { color: var(--red); }
+
+/* Timeline */
+.timeline {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+.timeline-row {
+    display: flex;
+    gap: 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.4);
+}
+.timeline-row:last-child { border-bottom: none; }
+.timeline-time {
+    flex-shrink: 0;
+    width: 140px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+.timeline-content { flex: 1; }
+.timeline-event { margin-bottom: 4px; }
+.timeline-desc {
+    font-size: 13px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    word-break: break-all;
+}
+.timeline-desc .cwd {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+/* Command sequence */
+.command-sequence {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+}
+.cmd-line {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 13px;
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.3);
+}
+.cmd-line:last-child { border-bottom: none; }
+.cmd-prompt {
+    color: var(--green);
+    margin-right: 4px;
+}
+.cmd-text { color: var(--text); }
+
 footer {
     text-align: center;
     padding-top: 16px;

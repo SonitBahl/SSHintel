@@ -4,12 +4,45 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request
 
 from honeypot.telemetry_store import TelemetryStore
 
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "sshintel.db"
+
+
+def _synthesize_session(events):
+    """Build a minimal session summary from events when no finalize record exists."""
+    if not events:
+        return None
+    first = events[0]
+    last = events[-1]
+    # Find the most common non-empty username
+    usernames = [e.get("username") for e in events if e.get("username")]
+    username = max(set(usernames), key=usernames.count) if usernames else None
+    # Find the most common non-empty source_ip
+    ips = [e.get("source_ip") for e in events if e.get("source_ip")]
+    source_ip = max(set(ips), key=ips.count) if ips else ""
+    # Determine auth result from events
+    auth_success = any(e.get("event_type") == "auth_success" for e in events)
+    auth_failure = any(e.get("event_type") == "auth_failure" for e in events)
+    if auth_success:
+        status = "success"
+    elif auth_failure:
+        status = "failure"
+    else:
+        status = "unknown"
+    return {
+        "session_id": first.get("session_id"),
+        "source_ip": source_ip,
+        "username": username,
+        "started_at": first.get("timestamp"),
+        "ended_at": last.get("timestamp"),
+        "duration": None,
+        "status": status,
+        "disconnect_reason": None,
+    }
 
 
 def create_app(db_path: str | os.PathLike | None = None) -> Flask:
@@ -28,6 +61,31 @@ def create_app(db_path: str | os.PathLike | None = None) -> Flask:
     @app.route("/")
     def index():
         return render_template("index.html")
+
+    @app.route("/session/<session_id>")
+    def session_view(session_id):
+        if not store.is_open:
+            abort(404)
+        session = store.get_session(session_id)
+        if session is None:
+            # Check if there are events for this session
+            events = store.get_session_events(session_id, limit=1)
+            if not events:
+                abort(404)
+        return render_template("session.html", session_id=session_id)
+
+    @app.route("/api/session/<session_id>")
+    def api_session(session_id):
+        if not store.is_open:
+            return jsonify({"error": "no_database"}), 404
+        session = store.get_session(session_id)
+        events = store.get_session_events(session_id)
+        if session is None and not events:
+            return jsonify({"error": "not_found"}), 404
+        # Synthesize a minimal session summary from events if no finalize record
+        if session is None:
+            session = _synthesize_session(events)
+        return jsonify({"session": session, "events": events})
 
     @app.route("/api/metrics")
     def api_metrics():

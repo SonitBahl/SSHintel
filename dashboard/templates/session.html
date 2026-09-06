@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSHintel — Session Investigation</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>SSHintel</h1>
+            <span class="status">● Investigation</span>
+        </header>
+
+        <nav class="breadcrumb">
+            <a href="/">&larr; Back to Dashboard</a>
+        </nav>
+
+        <section id="session-summary" class="session-summary">
+            <h2>Session Investigation</h2>
+            <div id="summary-content">
+                <div class="empty">Loading session…</div>
+            </div>
+        </section>
+
+        <section id="command-sequence-section">
+            <h2>Command Sequence</h2>
+            <div id="command-sequence" class="command-sequence">
+                <div class="empty">Loading commands…</div>
+            </div>
+        </section>
+
+        <section id="timeline-section">
+            <h2>Attack Timeline</h2>
+            <div id="timeline" class="timeline">
+                <div class="empty">Loading timeline…</div>
+            </div>
+        </section>
+
+        <footer>
+            <span id="session-status">Loading…</span>
+        </footer>
+    </div>
+
+    <script src="{{ url_for('static', filename='session.js') }}"></script>
+</body>
+</html>

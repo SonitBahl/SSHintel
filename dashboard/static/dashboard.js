@@ -139,6 +139,26 @@ function drawActivityChart(rows) {
     });
 }
 
+function renderRecentSessions(sessions) {
+    var tbody = document.getElementById('recent-sessions-body');
+    if (!sessions || sessions.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty">No sessions yet</td></tr>';
+        return;
+    }
+    tbody.innerHTML = sessions.map(function(s) {
+        var sid = escapeHtml(s.session_id || '');
+        var shortId = sid.length > 12 ? sid.slice(0, 12) + '…' : sid;
+        return '<tr>' +
+            '<td><a class="session-link" href="/session/' + sid + '" title="' + sid + '">' + shortId + '</a></td>' +
+            '<td>' + escapeHtml(s.source_ip) + '</td>' +
+            '<td>' + escapeHtml(s.username) + '</td>' +
+            '<td>' + escapeHtml(s.started_at || '') + '</td>' +
+            '<td>' + (s.duration != null ? Number(s.duration).toFixed(1) + 's' : '—') + '</td>' +
+            '<td>' + escapeHtml(s.status || '') + '</td>' +
+        '</tr>';
+    }).join('');
+}
+
 async function refresh() {
     try {
         var results = await Promise.all([
@@ -147,6 +167,7 @@ async function refresh() {
             fetchJson('/api/top-usernames'),
             fetchJson('/api/top-ips'),
             fetchJson('/api/recent-events'),
+            fetchJson('/api/recent-sessions'),
             fetchJson('/api/activity')
         ]);
         renderMetrics(results[0]);
@@ -154,7 +175,8 @@ async function refresh() {
         renderRanking('top-usernames', results[2], 'username', 'count');
         renderRanking('top-ips', results[3], 'source_ip', 'count');
         renderRecent(results[4]);
-        drawActivityChart(results[5]);
+        renderRecentSessions(results[5]);
+        drawActivityChart(results[6]);
         document.getElementById('last-updated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
     } catch (err) {
         console.error('Dashboard refresh failed:', err);

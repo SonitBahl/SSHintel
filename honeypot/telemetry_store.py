@@ -154,6 +154,10 @@ class TelemetryStore:
 
     def record_session_finalize(self, session_id, username, ended_at,
                                 duration, status, disconnect_reason):
+        """Record or update a session's final state.
+
+        ``source_ip`` is looked up from events if not already known.
+        """
         if self._conn is None:
             return
         try:
@@ -163,16 +167,17 @@ class TelemetryStore:
                     "(session_id, source_ip, username, started_at, ended_at, "
                     "duration, status, disconnect_reason) "
                     "VALUES(?, "
-                    "COALESCE((SELECT source_ip FROM sessions "
-                    "WHERE session_id=?), ''), ?, "
-                    "COALESCE((SELECT started_at FROM sessions "
-                    "WHERE session_id=?), ''), "
+                    "COALESCE((SELECT source_ip FROM sessions WHERE session_id=? AND source_ip IS NOT NULL AND source_ip != ''), "
+                    "(SELECT source_ip FROM events WHERE session_id=? AND source_ip IS NOT NULL AND source_ip != '' LIMIT 1), ''), "
+                    "?, "
+                    "COALESCE((SELECT started_at FROM sessions WHERE session_id=?), ''), "
                     "?, ?, ?, ?)",
-                    (session_id, session_id, username, session_id,
+                    (session_id, session_id, session_id, username, session_id,
                      ended_at, duration, status, disconnect_reason),
                 )
                 self._conn.commit()
         except Exception as exc:
+            print(f"!!! SQLite error recording session finalize: {exc}")
             print(f"!!! SQLite session-finalize error: {exc}")
 
     # ---- Query helpers ----
@@ -310,6 +315,33 @@ class TelemetryStore:
             (f"-{hours} hours",),
         )
         return [{"hour": r[0], "count": r[1]} for r in rows]
+
+    # ---- Session investigation ----
+
+    def get_session(self, session_id):
+        """Return summary metadata for a single session, or None if unknown."""
+        rows = self._query_all(
+            "SELECT session_id, source_ip, username, started_at, ended_at, "
+            "duration, status, disconnect_reason "
+            "FROM sessions WHERE session_id = ?",
+            (session_id,),
+        )
+        if not rows:
+            return None
+        cols = ["session_id", "source_ip", "username", "started_at",
+                "ended_at", "duration", "status", "disconnect_reason"]
+        return dict(zip(cols, rows[0]))
+
+    def get_session_events(self, session_id, limit=500):
+        """Return all events for a session, ordered chronologically."""
+        rows = self._query_all(
+            "SELECT timestamp, event_type, session_id, source_ip, "
+            "source_port, username, command, cwd, metadata "
+            "FROM events WHERE session_id = ? "
+            "ORDER BY timestamp ASC, id ASC LIMIT ?",
+            (session_id, limit),
+        )
+        return [self._row_to_dict(r) for r in rows]
 
     # ---- Internal helpers ----
 

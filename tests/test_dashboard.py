@@ -264,3 +264,146 @@ class TestDashboardSecurity:
         data = json.loads(response.data)
         assert len(data) == 1
         assert data[0]["username"] == '<script>alert("xss")</script>'
+
+
+class TestSessionInvestigation:
+    """Verify the session investigation API and page."""
+
+    def test_session_page_returns_200(self, client):
+        response = client.get("/session/sess-001")
+        assert response.status_code == 200
+        assert b"Session Investigation" in response.data
+
+    def test_session_page_404_for_unknown(self, client):
+        response = client.get("/session/nonexistent")
+        assert response.status_code == 404
+
+    def test_session_page_404_for_empty_db(self, empty_client):
+        response = empty_client.get("/session/anything")
+        assert response.status_code == 404
+
+    def test_api_session_returns_data(self, client):
+        response = client.get("/api/session/sess-001")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert "session" in data
+        assert "events" in data
+        assert data["session"]["session_id"] == "sess-001"
+        assert data["session"]["source_ip"] == "10.0.0.1"
+        assert data["session"]["username"] == "root"
+
+    def test_api_session_events_chronological(self, client):
+        response = client.get("/api/session/sess-001")
+        data = json.loads(response.data)
+        events = data["events"]
+        assert len(events) >= 4
+        timestamps = [e["timestamp"] for e in events]
+        assert timestamps == sorted(timestamps)
+
+    def test_api_session_only_returns_own_events(self, client):
+        response = client.get("/api/session/sess-001")
+        data = json.loads(response.data)
+        for event in data["events"]:
+            assert event["session_id"] == "sess-001"
+
+    def test_api_session_404_for_unknown(self, client):
+        response = client.get("/api/session/nonexistent")
+        assert response.status_code == 404
+        data = json.loads(response.data)
+        assert data["error"] == "not_found"
+
+    def test_api_session_404_for_empty_db(self, empty_client):
+        response = empty_client.get("/api/session/anything")
+        assert response.status_code == 404
+
+    def test_session_summary_fields(self, client):
+        response = client.get("/api/session/sess-001")
+        data = json.loads(response.data)
+        session = data["session"]
+        assert session["session_id"] == "sess-001"
+        assert session["source_ip"] == "10.0.0.1"
+        assert session["username"] == "root"
+        assert session["duration"] == 300.0
+        assert session["status"] == "closed"
+
+    def test_session_command_count(self, client):
+        response = client.get("/api/session/sess-001")
+        data = json.loads(response.data)
+        commands = [e for e in data["events"] if e["event_type"] == "command"]
+        assert len(commands) == 2
+        assert commands[0]["command"] == "ls -la"
+        assert commands[1]["command"] == "cat /etc/passwd"
+
+    def test_session_with_failed_auth(self, client):
+        response = client.get("/api/session/sess-002")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["session"]["status"] == "closed"
+        auth_events = [e for e in data["events"] if e["event_type"] == "auth_failure"]
+        assert len(auth_events) == 1
+
+    def test_session_events_no_disconnect(self, tmp_path):
+        """Sessions without a disconnect event should still render."""
+        db_path = tmp_path / "nodc.db"
+        store = TelemetryStore(db_path)
+        store.open()
+        store.log_event({
+            "timestamp": "2026-09-05T10:00:00.000000Z",
+            "event_type": "connect",
+            "session_id": "sess-nodc",
+            "source_ip": "10.0.0.5",
+        })
+        store.log_event({
+            "timestamp": "2026-09-05T10:00:05.000000Z",
+            "event_type": "command",
+            "session_id": "sess-nodc",
+            "source_ip": "10.0.0.5",
+            "username": "root",
+            "command": "whoami",
+            "cwd": "/root",
+        })
+        store.close()
+        app = create_app(db_path)
+        app.config["TESTING"] = True
+        with app.test_client() as c:
+            response = c.get("/api/session/sess-nodc")
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert len(data["events"]) == 2
+            # Session is synthesized from events when no finalize record exists
+            assert data["session"] is not None
+            assert data["session"]["session_id"] == "sess-nodc"
+            assert data["session"]["source_ip"] == "10.0.0.5"
+            assert data["session"]["username"] == "root"
+            assert data["session"]["status"] == "unknown"
+
+    def test_session_xss_in_command(self, tmp_path):
+        """Attacker-controlled commands must be stored as data, not executed."""
+        db_path = tmp_path / "sess-xss.db"
+        store = TelemetryStore(db_path)
+        store.open()
+        store.log_event({
+            "timestamp": "2026-09-05T10:00:00.000000Z",
+            "event_type": "command",
+            "session_id": "sess-xss2",
+            "source_ip": "10.0.0.99",
+            "username": "<script>alert(1)</script>",
+            "command": "'; DROP TABLE events; --",
+            "cwd": "/tmp",
+        })
+        store.close()
+        app = create_app(db_path)
+        app.config["TESTING"] = True
+        with app.test_client() as c:
+            response = c.get("/api/session/sess-xss2")
+            assert response.status_code == 200
+            data = json.loads(response.data)
+            assert data["events"][0]["command"] == "'; DROP TABLE events; --"
+            assert data["events"][0]["username"] == "<script>alert(1)</script>"
+            # Verify the table still exists (injection didn't work)
+            resp2 = c.get("/api/metrics")
+            assert resp2.status_code == 200
+
+    def test_session_not_found_page_message(self, client):
+        response = client.get("/session/does-not-exist")
+        assert response.status_code == 404

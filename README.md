@@ -19,6 +19,7 @@
 - Optional `--tarpit` mode to slow down attackers with delayed output
 - Per-session isolated fake filesystem with file creation and reading support
 - **Local web dashboard** for visualizing captured security telemetry (sessions, commands, auth attempts, top attackers)
+- **Session investigation view** — select any session and reconstruct the complete attack timeline chronologically, including source IP, authentication outcome, every command executed with its working directory, and session duration
 - **Everything is simulated** — commands never execute on the host, never access the real filesystem, and make no network requests.
 
 > SSHintel is **not** a full Bash/Linux shell. It simulates a believable subset of common commands to gather attacker telemetry. Commands are dispatched by a lightweight registry; adding a command means adding a small handler function.
@@ -104,7 +105,16 @@ Then open `http://localhost:5000` in your browser.
 - **Activity chart** — connections over time, grouped by hour
 - **Top commands** — the most frequently run attacker commands
 - **Targeted usernames** — which usernames attackers are trying
+- **Recent sessions** — click any session ID to investigate it
 - **Recent activity** — the latest telemetry events in a searchable table
+
+### Session investigation
+
+Click a session ID (or navigate to `/session/<session_id>`) to open the **session investigation view**, which reconstructs a single attack chronologically:
+
+- **Session summary** — source IP, username, start/end times, duration, authentication result, disconnect reason
+- **Attack timeline** — every event (connect, auth attempts, commands, disconnect) in chronological order
+- **Command sequence** — a compact `$ command` view of everything the attacker typed, with working directories
 
 ### Example workflow
 
