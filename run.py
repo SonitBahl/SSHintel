@@ -111,11 +111,17 @@ def main():
 
     # --- Honeypot server ---
     if args.command == "serve":
+        # Create the telemetry store (SQLite database) and configure it
+        # as the global store for all event logging.
         store = _get_store(args.db, args.no_db)
         set_telemetry_store(store)
+        # Open the database connection and create tables if needed.
+        # This MUST be called before honeypot() so events can be persisted.
         store.open()
         try:
             honeypot(
+                # NOTE: 'address' not 'host' — the honeypot() function signature
+                # uses 'address' for the bind address parameter.
                 address=args.host,
                 port=args.port,
                 username=args.username,
@@ -124,6 +130,10 @@ def main():
                 max_connections=args.max_connections,
                 auth_timeout=args.auth_timeout,
                 session_idle_timeout=args.session_idle_timeout,
+                # Pass the database path so honeypot() initializes the same
+                # store instead of resetting it to None. Without this, the
+                # honeypot() function would call set_telemetry_store(None)
+                # and no events would be written to SQLite.
                 telemetry_db=store.db_path,
             )
         finally:

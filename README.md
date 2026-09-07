@@ -1,7 +1,7 @@
 # SSHintel — Lightweight SSH Honeypot
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Python](https://img.shields.io/badge/Python-3.12%2B-blue)
+![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![Last Commit](https://img.shields.io/github/last-commit/sonitbahl/SSHintel)
 ![Repo Size](https://img.shields.io/github/repo-size/sonitbahl/SSHintel)
 
@@ -28,21 +28,13 @@
 
 ## 🛠️ Setup
 
-### 1. 🔑 Generate SSH Host Key
-
-```bash
-ssh-keygen -t rsa -b 2048 -m PEM -f static/server.key
-```
-
-> This will generate a private key at `static/server.key`. **Do not set a passphrase.**
-
----
-
-### 2. 📦 Install Dependencies
+### 1. 📦 Install Dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
+
+> **Note:** The SSH host key is automatically generated on first run. No manual key generation needed.
 
 ---
 
@@ -51,15 +43,23 @@ pip install -r requirements.txt
 Run the honeypot with a specific port, username, and password:
 
 ```bash
-python run.py --port 2222 --username user1 --password pass123
+python3 run.py serve --port 2222 --username user1 --password pass123
 ```
 
 > Default port is `2222` and host is `0.0.0.0`.
 
+The honeypot **automatically generates** an SSH host key at `static/server.key` on first run if one doesn't exist. No manual key generation is needed.
+
 To enable tarpit mode:
 
 ```bash
-python run.py --port 2222 --username user1 --password pass123 --tarpit
+python3 run.py serve --port 2222 --username user1 --password pass123 --tarpit
+```
+
+To disable SQLite telemetry (JSONL only):
+
+```bash
+python3 run.py serve --port 2222 --username user1 --password pass123 --no-db
 ```
 
 ## 🛡️ Connection limits & timeouts
@@ -75,7 +75,7 @@ SSHintel guards against resource exhaustion from many concurrent connections or 
 Example:
 
 ```bash
-python run.py --port 2222 --username user1 --password pass123 \
+python3 run.py serve --port 2222 --username user1 --password pass123 \
   --max-connections 25 --auth-timeout 30 --session-idle-timeout 300
 ```
 
@@ -92,7 +92,7 @@ SSHintel includes a local web dashboard that visualizes the security telemetry s
 ### Start the dashboard
 
 ```bash
-python run.py dashboard
+python3 run.py dashboard
 ```
 
 Then open `http://localhost:5000` in your browser.
@@ -120,10 +120,10 @@ Click a session ID (or navigate to `/session/<session_id>`) to open the **sessio
 
 ```bash
 # Terminal 1: start the honeypot
-python run.py --port 2222 --username user1 --password pass123
+python3 run.py serve --port 2222 --username user1 --password pass123
 
 # Terminal 2: start the dashboard
-python run.py dashboard
+python3 run.py dashboard
 
 # Terminal 3: simulate an attacker
 ssh user1@localhost -p 2222
@@ -172,9 +172,7 @@ Each incoming SSH connection is tracked as an independent **session** with its o
 
 Every session also receives its **own isolated, in-memory fake filesystem** — the simulated filesystem is created fresh for each connection and cleaned up when the connection ends. Files, directories, and the working directory created or changed by one attacker are never visible to another attacker connected at the same time. The entire filesystem is simulated in Python memory and **never touches the real host filesystem**.
 
-Current `event_type` values: `connect`, `auth_attempt`, `auth_success`, `auth_failure`, `command`, `disconnect`, `tarpit`.
-
-You can extend `logger.py` to send logs to files, remote servers, or alerting systems.
+Current `event_type` values: `connect`, `auth_attempt`, `auth_success`, `auth_failure`, `command`, `disconnect`, `connection_rejected`, `tarpit`.
 
 ---
 
@@ -184,31 +182,45 @@ You can extend `logger.py` to send logs to files, remote servers, or alerting sy
 SSHintel/
 ├── honeypot/                  # Core honeypot logic
 │   ├── __init__.py
-│   ├── main.py                # CLI entrypoint
-│   ├── handlers.py            # Shell logic + tarpit
-│   ├── server.py              # Paramiko-based server interface
+│   ├── main.py                # Accept loop + connection limiting
+│   ├── handlers.py            # SSH transport setup + emulated shell
+│   ├── server.py              # Paramiko server interface (auth)
 │   ├── session.py             # Per-connection session tracking
 │   ├── fs.py                  # In-memory fake filesystem (isolated per session)
-│   ├── shell.py               # Fake shell: command registry + dispatcher + handlers
+│   ├── shell.py               # Fake shell: command registry + dispatcher
 │   ├── limits.py              # Thread-safe concurrent connection limiting
-│   ├── logger.py              # Logging setup and methods
-│   └── __pycache__/           # Compiled Python bytecode
+│   ├── logger.py              # JSONL event logging + SQLite bridge
+│   └── telemetry_store.py     # SQLite telemetry store + query layer
 │
-├── log_files/                 # Logs for credentials, commands, and events
-│   ├── creds_audits.log
-│   ├── cmd_audits.log
+├── dashboard/                 # Local web dashboard
+│   ├── app.py                 # Flask application + API routes
+│   ├── templates/
+│   │   ├── index.html         # Main dashboard template
+│   │   └── session.html       # Session investigation template
+│   └── static/
+│       ├── style.css          # Dashboard styles
+│       ├── dashboard.js       # Main dashboard JS (live updates)
+│       └── session.js         # Session investigation JS
+│
+├── log_files/                 # Runtime logs (git-ignored)
+│   ├── creds_audits.log       # Credential attempts
+│   ├── cmd_audits.log         # Command audit trail
 │   └── events.jsonl           # Structured JSONL security events
 │
-├── static/                    # SSH key and dummy files
-│   ├── server.key             # Private host key
-│   ├── server.key.pub         # Public host key
-│   └── notes.txt             
+├── data/                      # SQLite database (git-ignored)
+│   └── sshintel.db
 │
-├── .gitignore
+├── static/                    # SSH host key (auto-generated)
+│   └── server.key
+│
+├── .github/workflows/         # CI configuration
+│   └── tests.yml
+│
 ├── Dockerfile
 ├── README.md
-├── requirements.txt           # Python dependencies
-└── run.py                     # Script to launch honeypot
+├── requirements.txt           # Runtime dependencies (paramiko, flask)
+├── requirements-dev.txt       # Test dependencies (pytest, pytest-cov)
+└── run.py                     # CLI entrypoint
 ```
 
 ---

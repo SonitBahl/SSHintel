@@ -110,9 +110,12 @@ def client_handle(client, addr, username, password, tarpit=False,
     record_session_connect(session.session_id, session.source_ip, session.connected_at)
     in_auth_phase = True
     try:
-        # Note: we do NOT set a socket-level timeout here because it
-        # interferes with Paramiko's SSH banner reading. Instead,
-        # transport.accept(auth_timeout) bounds the handshake phase.
+        # IMPORTANT: Do NOT set a socket-level timeout (client.settimeout())
+        # before creating the Paramiko Transport. Setting a socket timeout
+        # interferes with Paramiko's SSH banner reading and causes
+        # "Error reading SSH protocol banner" errors. Instead, we rely on
+        # transport.accept(auth_timeout) to bound the handshake phase, and
+        # the shell applies its own per-recv inactivity timeout via the channel.
         transport = paramiko.Transport(client)
         transport.local_version = "SSH-2.0-MySSHServer_1.0"
         transport.add_server_key(host_key)
