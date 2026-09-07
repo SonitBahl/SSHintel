@@ -110,9 +110,9 @@ def client_handle(client, addr, username, password, tarpit=False,
     record_session_connect(session.session_id, session.source_ip, session.connected_at)
     in_auth_phase = True
     try:
-        # Bound the SSH handshake + authentication phase so a client that
-        # connects but never completes auth cannot hold a socket forever.
-        client.settimeout(auth_timeout)
+        # Note: we do NOT set a socket-level timeout here because it
+        # interferes with Paramiko's SSH banner reading. Instead,
+        # transport.accept(auth_timeout) bounds the handshake phase.
         transport = paramiko.Transport(client)
         transport.local_version = "SSH-2.0-MySSHServer_1.0"
         transport.add_server_key(host_key)
@@ -125,9 +125,8 @@ def client_handle(client, addr, username, password, tarpit=False,
             print("No channel was opened.")
             session.disconnect_reason = 'auth_timeout'
             return
-        # Handshake is done; clear the socket-level timeout. The shell applies
-        # its own per-recv inactivity timeout via the channel.
-        client.settimeout(None)
+        # Handshake is done; the shell applies its own per-recv inactivity
+        # timeout via the channel.
         in_auth_phase = False
 
         banner = "Welcome to Ubuntu 22.04 LTS!\r\n\r\n"

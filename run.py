@@ -113,9 +113,10 @@ def main():
     if args.command == "serve":
         store = _get_store(args.db, args.no_db)
         set_telemetry_store(store)
+        store.open()
         try:
             honeypot(
-                host=args.host,
+                address=args.host,
                 port=args.port,
                 username=args.username,
                 password=args.password,
@@ -123,6 +124,7 @@ def main():
                 max_connections=args.max_connections,
                 auth_timeout=args.auth_timeout,
                 session_idle_timeout=args.session_idle_timeout,
+                telemetry_db=store.db_path,
             )
         finally:
             store.close()
