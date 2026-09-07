@@ -2,7 +2,11 @@
  * SSHintel dashboard frontend.
  * Fetches telemetry from the API endpoints and renders it into the page.
  * All rendering uses textContent/escape to avoid XSS from attacker-controlled data.
+ * Supports live updates via incremental polling.
  */
+
+var POLL_INTERVAL = 2000;  // milliseconds between live updates
+var MAX_KNOWN_EVENTS = 50;  // max recent events to keep in DOM
 
 function escapeHtml(str) {
     if (str === null || str === undefined) return '';
@@ -16,7 +20,25 @@ function escapeHtml(str) {
 
 async function fetchJson(url) {
     const resp = await fetch(url);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
     return resp.json();
+}
+
+// ---- State for incremental updates ----
+var lastEventId = 0;
+var recentEvents = [];
+var pollTimer = null;
+
+function setLiveIndicator(connected, message) {
+    var el = document.getElementById('live-indicator');
+    if (!el) return;
+    if (connected) {
+        el.textContent = message || '● Live';
+        el.className = 'status live-connected';
+    } else {
+        el.textContent = message || '⚠ Reconnecting...';
+        el.className = 'status live-disconnected';
+    }
 }
 
 function renderMetrics(data) {
@@ -63,20 +85,29 @@ function eventDetails(event) {
     return '';
 }
 
-function renderRecent(events) {
+function eventRowHtml(e, isNew) {
+    var cls = isNew ? ' class="event-new"' : '';
+    return '<tr' + cls + '>' +
+        '<td>' + escapeHtml(e.timestamp || '') + '</td>' +
+        '<td>' + eventBadge(e.event_type) + '</td>' +
+        '<td>' + escapeHtml(e.source_ip) + '</td>' +
+        '<td>' + escapeHtml(e.username) + '</td>' +
+        '<td>' + eventDetails(e) + '</td>' +
+    '</tr>';
+}
+
+function renderRecent(events, newIds) {
     var tbody = document.getElementById('recent-body');
     if (!events || events.length === 0) {
         tbody.innerHTML = '<tr><td colspan="5" class="empty">No telemetry yet</td></tr>';
         return;
     }
+    var newIdSet = {};
+    if (newIds) {
+        for (var i = 0; i < newIds.length; i++) { newIdSet[newIds[i]] = true; }
+    }
     tbody.innerHTML = events.map(function(e) {
-        return '<tr>' +
-            '<td>' + escapeHtml(e.timestamp || '') + '</td>' +
-            '<td>' + eventBadge(e.event_type) + '</td>' +
-            '<td>' + escapeHtml(e.source_ip) + '</td>' +
-            '<td>' + escapeHtml(e.username) + '</td>' +
-            '<td>' + eventDetails(e) + '</td>' +
-        '</tr>';
+        return eventRowHtml(e, newIdSet[e.id]);
     }).join('');
 }
 
@@ -159,6 +190,7 @@ function renderRecentSessions(sessions) {
     }).join('');
 }
 
+// ---- Full refresh (initial load) ----
 async function refresh() {
     try {
         var results = await Promise.all([
@@ -174,14 +206,91 @@ async function refresh() {
         renderRanking('top-commands', results[1], 'command', 'count');
         renderRanking('top-usernames', results[2], 'username', 'count');
         renderRanking('top-ips', results[3], 'source_ip', 'count');
-        renderRecent(results[4]);
+        recentEvents = results[4] || [];
+        renderRecent(recentEvents);
         renderRecentSessions(results[5]);
         drawActivityChart(results[6]);
+        // Track the latest event id for incremental polling
+        updateLastEventId(recentEvents);
         document.getElementById('last-updated').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+        setLiveIndicator(true);
     } catch (err) {
         console.error('Dashboard refresh failed:', err);
         document.getElementById('last-updated').textContent = 'Error loading telemetry';
+        setLiveIndicator(false, '⚠ Error loading telemetry');
     }
 }
 
+function updateLastEventId(events) {
+    if (!events || events.length === 0) return;
+    for (var i = 0; i < events.length; i++) {
+        if (events[i].id && events[i].id > lastEventId) {
+            lastEventId = events[i].id;
+        }
+    }
+}
+
+// ---- Incremental live polling ----
+async function pollNewEvents() {
+    try {
+        var data = await fetchJson('/api/events/after/' + lastEventId);
+        var newEvents = data.events || [];
+        if (newEvents.length > 0) {
+            // Append new events to our local list
+            recentEvents = recentEvents.concat(newEvents);
+            // Trim to max size (keep most recent)
+            if (recentEvents.length > MAX_KNOWN_EVENTS) {
+                recentEvents = recentEvents.slice(recentEvents.length - MAX_KNOWN_EVENTS);
+            }
+            // Re-render with new events highlighted
+            renderRecent(recentEvents, newEvents.map(function(e) { return e.id; }));
+            // Update last known event id
+            lastEventId = data.latest_id;
+            // Refresh metrics and sessions (they may have changed)
+            await refreshMetricsAndSessions();
+        }
+        setLiveIndicator(true);
+    } catch (err) {
+        console.error('Live poll failed:', err);
+        setLiveIndicator(false, '⚠ Reconnecting...');
+    }
+}
+
+async function refreshMetricsAndSessions() {
+    try {
+        var results = await Promise.all([
+            fetchJson('/api/metrics'),
+            fetchJson('/api/recent-sessions')
+        ]);
+        renderMetrics(results[0]);
+        renderRecentSessions(results[1]);
+    } catch (err) {
+        console.error('Failed to refresh metrics/sessions:', err);
+    }
+}
+
+function startPolling() {
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(pollNewEvents, POLL_INTERVAL);
+}
+
+function stopPolling() {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+}
+
+// ---- Initialize ----
 refresh();
+startPolling();
+
+// Stop polling when page is hidden to save resources
+document.addEventListener('visibilitychange', function() {
+    if (document.hidden) {
+        stopPolling();
+    } else {
+        startPolling();
+        pollNewEvents();
+    }
+});

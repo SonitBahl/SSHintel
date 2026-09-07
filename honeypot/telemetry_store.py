@@ -343,6 +343,24 @@ class TelemetryStore:
         )
         return [self._row_to_dict(r) for r in rows]
 
+    def get_events_after(self, event_id, limit=100):
+        """Return events with id greater than ``event_id``, ordered by id.
+
+        Used by the dashboard for incremental live updates. Returns at most
+        ``limit`` events to avoid overwhelming the client.
+        """
+        rows = self._query_all(
+            "SELECT id, timestamp, event_type, session_id, source_ip, "
+            "source_port, username, command, cwd, metadata "
+            "FROM events WHERE id > ? ORDER BY id ASC LIMIT ?",
+            (event_id, limit),
+        )
+        return [self._row_to_dict(r, include_id=True) for r in rows]
+
+    def get_latest_event_id(self):
+        """Return the highest event id, or 0 if no events exist."""
+        return self._query_scalar("SELECT COALESCE(MAX(id), 0) FROM events")
+
     # ---- Internal helpers ----
 
     def _query_scalar(self, sql, params=()):
@@ -369,9 +387,11 @@ class TelemetryStore:
             return []
 
     @staticmethod
-    def _row_to_dict(row):
+    def _row_to_dict(row, include_id=False):
         keys = ["timestamp", "event_type", "session_id", "source_ip",
                 "source_port", "username", "command", "cwd", "metadata"]
+        if include_id:
+            keys = ["id"] + keys
         d = dict(zip(keys, row))
         if d.get("metadata"):
             try:

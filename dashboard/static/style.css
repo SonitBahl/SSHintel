@@ -210,6 +210,19 @@ section h2 {
 .event-connection_rejected { background: rgba(248, 81, 73, 0.15); color: var(--red); }
 .event-tarpit { background: rgba(210, 153, 34, 0.15); color: var(--orange); }
 
+/* Live indicator */
+.live-connected { color: var(--green); }
+.live-disconnected { color: var(--orange); }
+
+/* New event highlight */
+.event-new td {
+    animation: highlight 2s ease-out;
+}
+@keyframes highlight {
+    0% { background: rgba(88, 166, 255, 0.25); }
+    100% { background: transparent; }
+}
+
 /* Session link in dashboard */
 .session-link {
     color: var(--accent);

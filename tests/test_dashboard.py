@@ -407,3 +407,130 @@ class TestSessionInvestigation:
     def test_session_not_found_page_message(self, client):
         response = client.get("/session/does-not-exist")
         assert response.status_code == 404
+
+
+class TestLiveTelemetry:
+    """Verify the live telemetry API endpoint for incremental updates."""
+
+    def test_events_after_returns_new_events(self, client):
+        """Events with id > given id should be returned."""
+        # The fixture has events with ids 1-7
+        response = client.get("/api/events/after/3")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert "events" in data
+        assert "latest_id" in data
+        # All returned events should have id > 3
+        for event in data["events"]:
+            assert event["id"] > 3
+
+    def test_events_after_returns_empty_when_up_to_date(self, client):
+        """When no new events exist, empty list is returned."""
+        response = client.get("/api/events/after/9999")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["events"] == []
+
+    def test_events_after_includes_id_field(self, client):
+        """Returned events should include the id field for tracking."""
+        response = client.get("/api/events/after/0")
+        data = json.loads(response.data)
+        if data["events"]:
+            assert "id" in data["events"][0]
+
+    def test_events_after_latest_id(self, client):
+        """latest_id should reflect the highest event id."""
+        response = client.get("/api/events/after/0")
+        data = json.loads(response.data)
+        assert data["latest_id"] > 0
+
+    def test_events_after_limit_clamped(self, client):
+        """Limit parameter should be clamped to sane range."""
+        response = client.get("/api/events/after/0?limit=10000")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        # Should not return more than 500 events
+        assert len(data["events"]) <= 500
+
+    def test_events_after_no_database(self, empty_client):
+        """When no database exists, return empty events with latest_id 0."""
+        response = empty_client.get("/api/events/after/0")
+        assert response.status_code == 200
+        data = json.loads(response.data)
+        assert data["events"] == []
+        assert data["latest_id"] == 0
+
+    def test_events_after_invalid_id(self, client):
+        """Non-integer event_id should return 404 (Flask route mismatch)."""
+        response = client.get("/api/events/after/abc")
+        assert response.status_code == 404
+
+    def test_incremental_update_no_duplicates(self, tmp_path):
+        """Incremental polling should not return already-seen events."""
+        db_path = tmp_path / "incr.db"
+        store = TelemetryStore(db_path)
+        store.open()
+        # Insert initial events
+        for i in range(3):
+            store.log_event({
+                "timestamp": f"2026-09-05T10:00:0{i}.000000Z",
+                "event_type": "command",
+                "session_id": "sess-001",
+                "source_ip": "10.0.0.1",
+                "command": f"cmd{i}",
+            })
+        store.close()
+
+        app = create_app(db_path)
+        app.config["TESTING"] = True
+        with app.test_client() as c:
+            # First poll: get all events
+            resp1 = c.get("/api/events/after/0")
+            data1 = json.loads(resp1.data)
+            assert len(data1["events"]) == 3
+            latest = data1["latest_id"]
+
+            # Second poll: no new events
+            resp2 = c.get(f"/api/events/after/{latest}")
+            data2 = json.loads(resp2.data)
+            assert len(data2["events"]) == 0
+
+    def test_new_event_appears_after_insert(self, tmp_path):
+        """After inserting a new event, it should appear in the next poll."""
+        db_path = tmp_path / "newevt.db"
+        store = TelemetryStore(db_path)
+        store.open()
+        store.log_event({
+            "timestamp": "2026-09-05T10:00:00.000000Z",
+            "event_type": "connect",
+            "session_id": "sess-001",
+            "source_ip": "10.0.0.1",
+        })
+        store.close()
+
+        app = create_app(db_path)
+        app.config["TESTING"] = True
+        with app.test_client() as c:
+            # Get initial state
+            resp1 = c.get("/api/events/after/0")
+            data1 = json.loads(resp1.data)
+            assert len(data1["events"]) == 1
+            latest = data1["latest_id"]
+
+            # Insert a new event directly into the database
+            store2 = TelemetryStore(db_path)
+            store2.open()
+            store2.log_event({
+                "timestamp": "2026-09-05T10:00:05.000000Z",
+                "event_type": "command",
+                "session_id": "sess-001",
+                "source_ip": "10.0.0.1",
+                "command": "whoami",
+            })
+            store2.close()
+
+            # Poll again: new event should appear
+            resp2 = c.get(f"/api/events/after/{latest}")
+            data2 = json.loads(resp2.data)
+            assert len(data2["events"]) == 1
+            assert data2["events"][0]["command"] == "whoami"

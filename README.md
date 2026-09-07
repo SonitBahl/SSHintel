@@ -132,7 +132,7 @@ ssh user1@localhost -p 2222
 
 Then open `http://localhost:5000` to inspect the captured activity.
 
-> The dashboard does **not** update live yet — refresh the page to see new telemetry. JSONL remains the raw source of truth; SQLite is a queryable derived store. Passwords are never displayed in the UI.
+> The dashboard supports **live telemetry** — it polls the honeypot every 2 seconds and updates automatically. New sessions, commands, and events appear in real-time without refreshing the page. A live indicator (● Live) shows the connection status.
 
 ---
 

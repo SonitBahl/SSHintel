@@ -130,4 +130,21 @@ def create_app(db_path: str | os.PathLike | None = None) -> Flask:
         rows = store.activity_by_hour(hours=limit)
         return jsonify(rows)
 
+    @app.route("/api/events/after/<int:event_id>")
+    def api_events_after(event_id):
+        """Return events newer than event_id for live dashboard updates.
+
+        This endpoint enables incremental polling: the client passes the
+        highest event id it has already seen and receives only newer events.
+        Returns at most 100 events per call to avoid overwhelming the client.
+        """
+        if not store.is_open:
+            return jsonify({"error": "no_database", "events": [], "latest_id": 0}), 200
+        limit = request.args.get("limit", 100, type=int)
+        # Clamp limit to a sane range
+        limit = max(1, min(limit, 500))
+        events = store.get_events_after(event_id, limit=limit)
+        latest_id = store.get_latest_event_id()
+        return jsonify({"events": events, "latest_id": latest_id})
+
     return app

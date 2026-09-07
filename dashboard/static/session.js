@@ -143,10 +143,122 @@ async function loadSession() {
         renderCommandSequence(data.events);
         document.getElementById('session-status').textContent =
             data.events.length + ' events · session ' + escapeHtml(sessionId);
+        // Track the latest event id for incremental polling
+        updateLastEventId(data.events);
+        // Start live polling if session is still active
+        if (isSessionActive(data.events)) {
+            startSessionPolling(sessionId);
+        }
     } catch (err) {
         console.error('Failed to load session:', err);
         document.getElementById('session-status').textContent = 'Error loading session';
     }
+}
+
+// ---- Live polling for active sessions ----
+var sessionPollTimer = null;
+var sessionLastEventId = 0;
+var currentSessionId = null;
+
+function updateLastEventId(events) {
+    if (!events || events.length === 0) return;
+    for (var i = 0; i < events.length; i++) {
+        if (events[i].id && events[i].id > sessionLastEventId) {
+            sessionLastEventId = events[i].id;
+        }
+    }
+}
+
+function isSessionActive(events) {
+    if (!events || events.length === 0) return false;
+    // Session is active if there's no disconnect event
+    for (var i = 0; i < events.length; i++) {
+        if (events[i].event_type === 'disconnect') return false;
+    }
+    return true;
+}
+
+async function pollSessionEvents() {
+    if (!currentSessionId) return;
+    try {
+        var resp = await fetch('/api/session/' + encodeURIComponent(currentSessionId));
+        if (resp.status === 404) return;
+        var data = await resp.json();
+        var events = data.events || [];
+        // Find new events
+        var newEvents = [];
+        for (var i = 0; i < events.length; i++) {
+            if (events[i].id && events[i].id > sessionLastEventId) {
+                newEvents.push(events[i]);
+            }
+        }
+        if (newEvents.length > 0) {
+            // Append new events to timeline
+            appendTimelineEvents(newEvents);
+            // Append new commands to sequence
+            appendCommandSequence(newEvents);
+            // Update last event id
+            updateLastEventId(newEvents);
+            // Update status
+            document.getElementById('session-status').textContent =
+                events.length + ' events · session ' + escapeHtml(currentSessionId);
+        }
+        // If session is now closed, stop polling
+        if (!isSessionActive(events)) {
+            stopSessionPolling();
+            // Update summary with final state
+            if (data.session) renderSummary(data.session);
+        }
+    } catch (err) {
+        console.error('Session poll failed:', err);
+    }
+}
+
+function appendTimelineEvents(events) {
+    var el = document.getElementById('timeline');
+    var html = events.map(function(e) {
+        return '<div class="timeline-row event-new">' +
+            '<div class="timeline-time">' + formatTimestamp(e.timestamp) + '</div>' +
+            '<div class="timeline-content">' +
+                '<div class="timeline-event">' + eventBadge(e.event_type) + '</div>' +
+                '<div class="timeline-desc">' + eventDescription(e) + '</div>' +
+            '</div>' +
+        '</div>';
+    }).join('');
+    // Remove empty state if present
+    var empty = el.querySelector('.empty');
+    if (empty) empty.remove();
+    el.insertAdjacentHTML('beforeend', html);
+}
+
+function appendCommandSequence(events) {
+    var el = document.getElementById('command-sequence');
+    var commands = events.filter(function(e) { return e.event_type === 'command'; });
+    if (commands.length === 0) return;
+    var html = commands.map(function(e) {
+        return '<div class="cmd-line event-new">' +
+            '<span class="cmd-prompt">$</span> ' +
+            '<span class="cmd-text">' + escapeHtml(e.command) + '</span>' +
+        '</div>';
+    }).join('');
+    // Remove empty state if present
+    var empty = el.querySelector('.empty');
+    if (empty) empty.remove();
+    el.insertAdjacentHTML('beforeend', html);
+}
+
+function startSessionPolling(sessionId) {
+    currentSessionId = sessionId;
+    if (sessionPollTimer) clearInterval(sessionPollTimer);
+    sessionPollTimer = setInterval(pollSessionEvents, 2000);
+}
+
+function stopSessionPolling() {
+    if (sessionPollTimer) {
+        clearInterval(sessionPollTimer);
+        sessionPollTimer = null;
+    }
+    currentSessionId = null;
 }
 
 loadSession();
