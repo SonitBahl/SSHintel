@@ -43,11 +43,13 @@ jobs:
       - name: Install runtime dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          # Retry pip installs up to 3 times to mitigate transient network flakes
+          n=0; until [ "$n" -ge 3 ]; do pip install -r requirements.txt && break; n=$((n+1)); echo "Retrying pip install... ($n)"; sleep 2; done
 
       # Step 4: Install test dependencies.
       - name: Install test dependencies
-        run: pip install -r requirements-dev.txt
+        run: |
+          n=0; until [ "$n" -ge 3 ]; do pip install -r requirements-dev.txt && break; n=$((n+1)); echo "Retrying pip install (dev)... ($n)"; sleep 2; done
 
       # Step 5: Run the full test suite with coverage.
       - name: Run tests
