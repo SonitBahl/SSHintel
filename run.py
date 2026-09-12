@@ -1,6 +1,7 @@
 from honeypot.main import honeypot
-from honeypot.logger import set_telemetry_store
+from honeypot.logger import set_telemetry_store, set_sensor_id
 from honeypot.telemetry_store import TelemetryStore
+import os
 import argparse
 import sys
 
@@ -78,6 +79,7 @@ def main():
     hp.add_argument("--max-connections", type=int, default=50, help="Max concurrent connections (default: 50)")
     hp.add_argument("--auth-timeout", type=int, default=60, help="Authentication timeout in seconds (default: 60)")
     hp.add_argument("--session-idle-timeout", type=int, default=300, help="Session idle timeout in seconds (default: 300)")
+    hp.add_argument("--sensor-id", default=None, help="Optional sensor identifier to include in telemetry events")
     hp.add_argument("--db", default=None, help="Path to SQLite telemetry database (default: data/sshintel.db)")
     hp.add_argument("--no-db", action="store_true", help="Disable SQLite telemetry storage")
 
@@ -115,6 +117,12 @@ def main():
         # as the global store for all event logging.
         store = _get_store(args.db, args.no_db)
         set_telemetry_store(store)
+        # Configure sensor_id from CLI or environment so all events include it.
+        sensor_from_env = os.environ.get("HONEYPOT_SENSOR_ID")
+        if args.sensor_id is not None:
+            set_sensor_id(args.sensor_id)
+        elif sensor_from_env:
+            set_sensor_id(sensor_from_env)
         # Open the database connection and create tables if needed.
         # This MUST be called before honeypot() so events can be persisted.
         store.open()

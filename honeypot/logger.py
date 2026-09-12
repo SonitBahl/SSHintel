@@ -13,6 +13,10 @@ log_dir.mkdir(exist_ok=True)
 # Remains None when telemetry is disabled, so all no-op checks short-circuit.
 _telemetry_store = None
 
+# Optional sensor identifier to include in every emitted event. Set by the
+# CLI or environment variable via `run.py` using `set_sensor_id()` below.
+_sensor_id = None
+
 creds_log_path = log_dir / 'creds_audits.log'
 cmd_log_path = log_dir / 'cmd_audits.log'
 events_log_path = log_dir / 'events.jsonl'
@@ -68,6 +72,10 @@ def build_event(event_type, session_id=None, source_ip=None, **extra):
     included when they are not ``None`` so the output stays compact.
     """
     event = {"timestamp": utc_now_iso(), "event_type": event_type}
+    # Attach configured sensor identifier when present to enable
+    # multi-sensor correlation in downstream analytics.
+    if _sensor_id is not None:
+        event["sensor_id"] = _sensor_id
     if session_id is not None:
         event["session_id"] = session_id
     if source_ip is not None:
@@ -111,6 +119,15 @@ def set_telemetry_store(store):
     """
     global _telemetry_store
     _telemetry_store = store
+
+
+def set_sensor_id(sensor_id):
+    """Configure the global sensor identifier included with every event.
+
+    Pass a string to set the sensor id, or ``None`` to clear it.
+    """
+    global _sensor_id
+    _sensor_id = sensor_id
 
 
 def record_session_connect(session_id, source_ip, connected_at):
