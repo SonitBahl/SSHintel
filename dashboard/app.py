@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Optional, Union
 
 from flask import Flask, abort, jsonify, render_template, request
 
@@ -45,7 +46,7 @@ def _synthesize_session(events):
     }
 
 
-def create_app(db_path: str | os.PathLike | None = None) -> Flask:
+def create_app(db_path: Optional[Union[str, os.PathLike]] = None) -> Flask:
     """Create and configure the Flask dashboard application.
 
     Args:

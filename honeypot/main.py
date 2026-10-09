@@ -8,7 +8,7 @@ from .telemetry_store import TelemetryStore
 
 def honeypot(address='0.0.0.0', port=2222, username=None, password=None, tarpit=False,
              max_connections=50, auth_timeout=60, session_idle_timeout=300,
-             telemetry_db=None):
+             tarpit_max_seconds=120, telemetry_db=None):
     """Start the SSH honeypot.
 
     Args:
@@ -35,7 +35,9 @@ def honeypot(address='0.0.0.0', port=2222, username=None, password=None, tarpit=
 
     print(f"SSH honeypot listening on {address}:{port} "
           f"(max {max_connections} connections, auth timeout {auth_timeout}s, "
-          f"session idle timeout {session_idle_timeout}s)")
+          f"session idle timeout {session_idle_timeout}s"
+          + (f", tarpit max {tarpit_max_seconds}s" if tarpit else "")
+          + ")")
 
     try:
         while True:
@@ -51,7 +53,8 @@ def honeypot(address='0.0.0.0', port=2222, username=None, password=None, tarpit=
                 t = threading.Thread(
                     target=_client_worker,
                     args=(client, addr, username, password, tarpit,
-                          auth_timeout, session_idle_timeout, limiter),
+                          auth_timeout, session_idle_timeout, limiter,
+                          tarpit_max_seconds),
                     daemon=True,
                 )
                 t.start()
@@ -66,13 +69,15 @@ def honeypot(address='0.0.0.0', port=2222, username=None, password=None, tarpit=
 
 
 def _client_worker(client, addr, username, password, tarpit,
-                   auth_timeout, session_idle_timeout, limiter):
+                   auth_timeout, session_idle_timeout, limiter,
+                   tarpit_max_seconds=120):
     """Run one connection's lifecycle, always returning its connection slot."""
     try:
         client_handle(
             client, addr, username, password, tarpit,
             auth_timeout=auth_timeout,
             session_idle_timeout=session_idle_timeout,
+            tarpit_max_seconds=tarpit_max_seconds,
         )
     finally:
         limiter.release()

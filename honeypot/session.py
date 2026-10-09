@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Optional
 
 from .fs import create_filesystem
 from .logger import new_session_id, utc_now_iso
@@ -36,14 +37,14 @@ class Session:
     source_ip: str
     session_id: str = field(default_factory=new_session_id)
     connected_at: str = field(default_factory=utc_now_iso)
-    username: str | None = None
-    authenticated_at: str | None = None
-    disconnected_at: str | None = None
-    auth_result: str | None = None
-    duration_seconds: float | None = None
+    username: Optional[str] = None
+    authenticated_at: Optional[str] = None
+    disconnected_at: Optional[str] = None
+    auth_result: Optional[str] = None
+    duration_seconds: Optional[float] = None
     # Why the session ended (e.g. 'idle_timeout', 'auth_timeout'); None for a
     # normal disconnect. Carried into the final disconnect event.
-    disconnect_reason: str | None = None
+    disconnect_reason: Optional[str] = None
     # Per-session isolated state: the fake filesystem and working directory.
     # Each Session gets its own independent copy created by ``create_filesystem``.
     fake_filesystem: dict = field(default_factory=create_filesystem)

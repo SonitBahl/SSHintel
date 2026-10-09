@@ -76,6 +76,8 @@ def main():
     hp.add_argument("--username", default="user1", help="Expected username (default: user1)")
     hp.add_argument("--password", default="pass123", help="Expected password (default: pass123)")
     hp.add_argument("--tarpit", action="store_true", help="Enable tarpit mode")
+    hp.add_argument("--tarpit-max-seconds", type=int, default=120,
+                    help="Maximum time to spend on tarpit banner/output delay per session (default: 120)")
     hp.add_argument("--max-connections", type=int, default=50, help="Max concurrent connections (default: 50)")
     hp.add_argument("--auth-timeout", type=int, default=60, help="Authentication timeout in seconds (default: 60)")
     hp.add_argument("--session-idle-timeout", type=int, default=300, help="Session idle timeout in seconds (default: 300)")
@@ -138,6 +140,7 @@ def main():
                 max_connections=args.max_connections,
                 auth_timeout=args.auth_timeout,
                 session_idle_timeout=args.session_idle_timeout,
+                tarpit_max_seconds=args.tarpit_max_seconds,
                 # Pass the database path so honeypot() initializes the same
                 # store instead of resetting it to None. Without this, the
                 # honeypot() function would call set_telemetry_store(None)
