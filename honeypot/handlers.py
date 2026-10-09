@@ -1,6 +1,6 @@
 import paramiko
-import time
 import socket
+import time
 from pathlib import Path
 
 from .server import Server
@@ -35,7 +35,8 @@ def _load_or_generate_host_key(path: Path) -> paramiko.RSAKey:
 
 host_key = _load_or_generate_host_key(host_key_path)
 
-def emulated_shell(channel, session, idle_timeout=300):
+def emulated_shell(channel, session, idle_timeout=300, tarpit=False,
+                  tarpit_max_seconds=120):
     prompt_template = "user1@ubuntu:{}$ "
     shell = FakeShell(session)
     command = b""
@@ -82,8 +83,7 @@ def emulated_shell(channel, session, idle_timeout=300):
                 command=cmd_line,
                 cwd=session.cwd,
             )
-            if output:
-                channel.send(output.encode() + b"\r\n" if not output.endswith("\n") else output.encode())
+            _send_output(channel, output, tarpit, tarpit_max_seconds)
             channel.send(_prompt(prompt_template, session.cwd))
 
         elif char == b"\x7f":
@@ -101,8 +101,45 @@ def _prompt(template, cwd):
     cwd_display = cwd.replace("/home/user1", "~") if cwd.startswith("/home/user1") else cwd
     return template.format(cwd_display).encode()
 
+
+def _send_slow_lines(channel, payload, max_seconds):
+    """Send payload line by line with a bounded delay between lines."""
+    if max_seconds <= 0:
+        channel.send(payload)
+        return
+
+    lines = payload.splitlines(keepends=True) or [payload]
+    deadline = time.monotonic() + max_seconds
+    for index, line in enumerate(lines):
+        if not line:
+            continue
+        channel.send(line)
+        if index == len(lines) - 1:
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            continue
+        time.sleep(min(0.2, remaining))
+
+
+def _send_output(channel, output, tarpit, tarpit_max_seconds):
+    """Send command output to the channel.
+
+    In tarpit mode, output is sent line by line with a small delay to slow the
+    attacker. In normal mode, output is sent immediately.
+    """
+    if output:
+        data = output.encode()
+        if not data.endswith(b"\n"):
+            data += b"\r\n"
+        if tarpit:
+            _send_slow_lines(channel, data, tarpit_max_seconds)
+        else:
+            channel.send(data)
+
 def client_handle(client, addr, username, password, tarpit=False,
-                  auth_timeout=60, session_idle_timeout=300):
+                  auth_timeout=60, session_idle_timeout=300, max_connections=50,
+                  tarpit_max_seconds=120):
     client_ip = addr[0]
     session = Session(source_ip=client_ip)
     print(f"{client_ip} connected to server.")
@@ -135,13 +172,9 @@ def client_handle(client, addr, username, password, tarpit=False,
         banner = "Welcome to Ubuntu 22.04 LTS!\r\n\r\n"
         if tarpit:
             log_event('tarpit', session_id=session.session_id, source_ip=session.source_ip)
-            for char in banner * 100:
-                channel.send(char)
-                time.sleep(8)
-        else:
-            channel.send(banner)
-
-        emulated_shell(channel, session, idle_timeout=session_idle_timeout)
+        channel.send(banner)
+        emulated_shell(channel, session, idle_timeout=session_idle_timeout,
+                       tarpit=tarpit)
 
     except socket.timeout:
         if in_auth_phase:

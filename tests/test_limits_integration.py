@@ -261,6 +261,45 @@ class TestLimitsIntegration(unittest.TestCase):
         events = _events_since(mark)
         self.assertTrue(any(e.get("event_type") == "tarpit" for e in events))
 
+    # --- Test 10: tarpit slot frees quickly -------------------------------
+    def test_tarpit_session_releases_slot_promptly(self):
+        port = _free_port()
+        tarpit_max_seconds = 1
+        threading.Thread(
+            target=honeypot,
+            kwargs={
+                "address": HOST,
+                "port": port,
+                "username": USER,
+                "password": PASSWD,
+                "tarpit": True,
+                "max_connections": 1,
+                "auth_timeout": 5,
+                "session_idle_timeout": 5,
+                "tarpit_max_seconds": tarpit_max_seconds,
+            },
+            daemon=True,
+        ).start()
+        self.assertTrue(_wait_for_port(port), "tarpit server did not start")
+
+        c1 = _connect(port)
+        shell = _invoke_shell(c1)
+        time.sleep(0.4)
+        _drain(shell)
+
+        start = time.monotonic()
+        c1.close()
+
+        c2 = _connect(port)
+        c2.close()
+
+        elapsed = time.monotonic() - start
+        self.assertLess(
+            elapsed,
+            tarpit_max_seconds + 3,
+            "tarpit held a connection slot too long after client disconnect",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
