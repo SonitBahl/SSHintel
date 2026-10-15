@@ -1,6 +1,7 @@
 import paramiko
 import socket
 import time
+import threading
 from pathlib import Path
 
 from .server import Server
@@ -146,16 +147,18 @@ def client_handle(client, addr, username, password, tarpit=False,
     log_event('connect', session_id=session.session_id, source_ip=session.source_ip)
     record_session_connect(session.session_id, session.source_ip, session.connected_at)
     in_auth_phase = True
+    transport = None
+    auth_timer = None
     try:
-        # IMPORTANT: Do NOT set a socket-level timeout (client.settimeout())
-        # before creating the Paramiko Transport. Setting a socket timeout
-        # interferes with Paramiko's SSH banner reading and causes
-        # "Error reading SSH protocol banner" errors. Instead, we rely on
-        # transport.accept(auth_timeout) to bound the handshake phase, and
-        # the shell applies its own per-recv inactivity timeout via the channel.
+        # Bound the ENTIRE handshake/auth phase, including clients that never
+        # send a banner. A socket timeout alone interferes with Paramiko reads.
         transport = paramiko.Transport(client)
         transport.local_version = "SSH-2.0-MySSHServer_1.0"
         transport.add_server_key(host_key)
+        if auth_timeout and auth_timeout > 0:
+            auth_timer = threading.Timer(auth_timeout, transport.close)
+            auth_timer.daemon = True
+            auth_timer.start()
 
         server = Server(client_ip, username, password, session=session)
         transport.start_server(server=server)
@@ -168,6 +171,9 @@ def client_handle(client, addr, username, password, tarpit=False,
         # Handshake is done; the shell applies its own per-recv inactivity
         # timeout via the channel.
         in_auth_phase = False
+        if auth_timer is not None:
+            auth_timer.cancel()
+            auth_timer.join()
 
         banner = "Welcome to Ubuntu 22.04 LTS!\r\n\r\n"
         if tarpit:
@@ -186,10 +192,15 @@ def client_handle(client, addr, username, password, tarpit=False,
         print("!!! Exception in client handler !!!")
         print(e)
     finally:
-        try:
+        if auth_timer is not None:
+            auth_timer.cancel()
+            auth_timer.join()
+        if transport is not None:
             transport.close()
-        except Exception:
-            pass
+            # Paramiko owns a separate thread. Don't close the telemetry store
+            # while an auth callback can still be writing to it.
+            if transport.ident is not None:
+                transport.join()
         client.close()
         # Finalize exactly once, then emit the disconnect event. ``finalize()``
         # is idempotent so we never emit more than one disconnect per session.

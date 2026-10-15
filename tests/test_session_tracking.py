@@ -1,5 +1,5 @@
 """Tests for session tracking."""
-import time
+from unittest.mock import patch
 
 import pytest
 
@@ -112,10 +112,14 @@ class TestSessionFinalization:
 
     def test_duration_increases_with_time(self):
         s1 = Session(source_ip='127.0.0.1')
-        s1.finalize()
-        time.sleep(0.1)
         s2 = Session(source_ip='127.0.0.1')
-        s2.finalize()
+        # Control elapsed time within each session, not the gap between them.
+        with patch('honeypot.session.time.monotonic', return_value=s1._connected_mono + 0.1):
+            s1.finalize()
+        with patch('honeypot.session.time.monotonic', return_value=s2._connected_mono + 0.2):
+            s2.finalize()
+        assert s1.duration_seconds == 0.1
+        assert s2.duration_seconds == 0.2
         assert s2.duration_seconds > s1.duration_seconds
 
     def test_disconnect_reason_preserved(self):
