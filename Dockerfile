@@ -28,5 +28,5 @@ EXPOSE ${PORT}
 
 # Generate RSA key if missing, then run the server.
 # NOTE: Uses the `serve` subcommand as expected by the current CLI.
-# The sensor-id and db-path are set via env vars for consistent telemetry tagging.
-CMD ["sh", "-c", "if [ ! -f static/server.key ]; then ssh-keygen -t rsa -b 2048 -m PEM -f static/server.key -N '' && rm -f static/server.key.pub; fi && exec python run.py serve --host 0.0.0.0 --port ${PORT} --username ${HONEYPOT_USERNAME} --password ${HONEYPOT_PASSWORD} --sensor-id ${HONEYPOT_SENSOR_ID} --db ${HONEYPOT_DB_PATH}"]
+# Python reads configuration directly; never interpolate credentials into a shell.
+CMD ["sh", "-c", "if [ ! -f static/server.key ]; then ssh-keygen -t rsa -b 2048 -m PEM -f static/server.key -N '' && rm -f static/server.key.pub; fi && exec python run.py serve"]

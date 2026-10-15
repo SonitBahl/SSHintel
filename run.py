@@ -1,7 +1,7 @@
 from honeypot.main import honeypot
 from honeypot.logger import set_telemetry_store, set_sensor_id
 from honeypot.telemetry_store import TelemetryStore
-import os
+from honeypot.config import ConfigError, load_config
 import argparse
 import sys
 
@@ -60,8 +60,8 @@ def cmd_dashboard(store, host="127.0.0.1", port=5000):
     app.run(host=host, port=port, debug=False)
 
 
-def main():
-    """Main CLI dispatcher for SSHintel."""
+def build_parser():
+    """Build the CLI without reading configuration or starting services."""
     parser = argparse.ArgumentParser(
         description="SSHintel — Lightweight SSH Honeypot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -70,20 +70,26 @@ def main():
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # --- Honeypot server ---
-    hp = subparsers.add_parser("serve", help="Run the SSH honeypot server")
-    hp.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
-    hp.add_argument("--port", type=int, default=2222, help="Bind port (default: 2222)")
-    hp.add_argument("--username", default="user1", help="Expected username (default: user1)")
-    hp.add_argument("--password", default="pass123", help="Expected password (default: pass123)")
+    hp = subparsers.add_parser("serve", help="Run the SSH honeypot server",
+                               argument_default=argparse.SUPPRESS)
+    hp.add_argument("--config", help="Configuration file (.toml on Python 3.11+, or .json)")
+    hp.add_argument("--host", help="Bind address (default: 0.0.0.0)")
+    hp.add_argument("--port", type=int, help="Bind port (default: 2222)")
+    hp.add_argument("--username", help="Expected username (default: user1)")
+    hp.add_argument("--password", help="Expected password (default: pass123)")
     hp.add_argument("--tarpit", action="store_true", help="Enable tarpit mode")
-    hp.add_argument("--tarpit-max-seconds", type=int, default=120,
+    hp.add_argument("--tarpit-max-seconds", type=int,
                     help="Maximum time to spend on tarpit banner/output delay per session (default: 120)")
-    hp.add_argument("--max-connections", type=int, default=50, help="Max concurrent connections (default: 50)")
-    hp.add_argument("--auth-timeout", type=int, default=60, help="Authentication timeout in seconds (default: 60)")
-    hp.add_argument("--session-idle-timeout", type=int, default=300, help="Session idle timeout in seconds (default: 300)")
-    hp.add_argument("--sensor-id", default=None, help="Optional sensor identifier to include in telemetry events")
-    hp.add_argument("--db", default=None, help="Path to SQLite telemetry database (default: data/sshintel.db)")
+    hp.add_argument("--max-connections", type=int, help="Max concurrent connections (default: 50)")
+    hp.add_argument("--auth-timeout", type=int, help="Authentication timeout in seconds (default: 60)")
+    hp.add_argument("--session-idle-timeout", type=int, help="Session idle timeout in seconds (default: 300)")
+    hp.add_argument("--sensor-id", help="Optional sensor identifier to include in telemetry events")
+    hp.add_argument("--db", help="Path to SQLite telemetry database (default: data/sshintel.db)")
     hp.add_argument("--no-db", action="store_true", help="Disable SQLite telemetry storage")
+    hp.add_argument("--no-tarpit", dest="tarpit", action="store_false", help="Disable tarpit mode")
+    hp.add_argument("--db-enabled", dest="no_db", action="store_false", help="Enable SQLite telemetry storage")
+    hp.add_argument("--fetch-payloads", action="store_true", help="Reserved; enabling is not supported yet")
+    hp.add_argument("--no-fetch-payloads", dest="fetch_payloads", action="store_false")
 
     # --- Telemetry queries ---
     stats = subparsers.add_parser("stats", help="Show telemetry statistics")
@@ -107,7 +113,13 @@ def main():
     dash.add_argument("--port", type=int, default=5000, help="Dashboard port (default: 5000)")
     dash.add_argument("--db", default=None, help="Path to SQLite database (default: data/sshintel.db)")
 
-    args = parser.parse_args()
+    return parser
+
+
+def main(argv=None):
+    """Main CLI dispatcher for SSHintel."""
+    parser = build_parser()
+    args = parser.parse_args(argv)
 
     if args.command is None:
         parser.print_help()
@@ -115,16 +127,22 @@ def main():
 
     # --- Honeypot server ---
     if args.command == "serve":
+        supplied = vars(args).copy()
+        supplied.pop("command")
+        config_path = supplied.pop("config", None)
+        if "db" in supplied:
+            supplied["db_path"] = supplied.pop("db")
+        try:
+            settings = load_config(supplied, config_path=config_path)
+        except ConfigError as exc:
+            parser.error(str(exc))
+        args = argparse.Namespace(**settings)
+        args.db = args.db_path
         # Create the telemetry store (SQLite database) and configure it
         # as the global store for all event logging.
         store = _get_store(args.db, args.no_db)
         set_telemetry_store(store)
-        # Configure sensor_id from CLI or environment so all events include it.
-        sensor_from_env = os.environ.get("HONEYPOT_SENSOR_ID")
-        if args.sensor_id is not None:
-            set_sensor_id(args.sensor_id)
-        elif sensor_from_env:
-            set_sensor_id(sensor_from_env)
+        set_sensor_id(args.sensor_id)
         # Open the database connection and create tables if needed.
         # This MUST be called before honeypot() so events can be persisted.
         store.open()

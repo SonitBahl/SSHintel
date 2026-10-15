@@ -62,6 +62,65 @@ To disable SQLite telemetry (JSONL only):
 python3 run.py serve --port 2222 --username user1 --password pass123 --no-db
 ```
 
+### Configuration files and environment variables
+
+Sensor settings use **CLI > environment > configuration file > defaults**.
+Only explicitly supplied CLI flags override other sources. This applies to
+`serve`; dashboard/query commands retain their own CLI settings.
+
+On Python 3.11+:
+
+```bash
+cp sshintel.toml.example sshintel.toml
+chmod 600 sshintel.toml
+python3 run.py serve
+```
+
+On Python 3.8/3.10, use the dependency-free JSON equivalent:
+
+```bash
+cp sshintel.json.example sshintel.json
+chmod 600 sshintel.json
+python3 run.py serve
+```
+
+Edit the copied file before deployment. TOML requires Python 3.11+; older
+versions fail with a clear instruction to use JSON. With no explicit file,
+SSHintel looks for `sshintel.toml`, then `sshintel.json` in the current directory.
+Use `serve --config /path/to/settings.json` or `HONEYPOT_CONFIG` to select another
+file (`--config` wins). Explicit missing files, malformed files, unknown keys,
+and invalid values fail before the server or database starts. File paths inside
+configuration are relative to the process working directory, not the config file.
+
+| File key | Environment variable | Default |
+|---|---|---|
+| `host` | `HONEYPOT_HOST` | `0.0.0.0` |
+| `port` | `HONEYPOT_PORT` (legacy alias: `PORT`) | `2222` |
+| `username` | `HONEYPOT_USERNAME` | `user1` |
+| `password` | `HONEYPOT_PASSWORD` | `pass123` |
+| `tarpit` | `HONEYPOT_TARPIT` | `false` |
+| `tarpit_max_seconds` | `HONEYPOT_TARPIT_MAX_SECONDS` | `120` |
+| `max_connections` | `HONEYPOT_MAX_CONNECTIONS` | `50` |
+| `auth_timeout` | `HONEYPOT_AUTH_TIMEOUT` | `60` |
+| `session_idle_timeout` | `HONEYPOT_SESSION_IDLE_TIMEOUT` | `300` |
+| `sensor_id` | `HONEYPOT_SENSOR_ID` | unset |
+| `db_path` | `HONEYPOT_DB_PATH` | `data/sshintel.db` |
+| `no_db` | `HONEYPOT_NO_DB` | `false` |
+| `fetch_payloads` | `HONEYPOT_FETCH_PAYLOADS` | `false` (reserved) |
+
+Environment booleans accept `true/false`, `1/0`, `yes/no`, and `on/off`.
+`HONEYPOT_PORT` takes precedence over `PORT`. Ports must be 1–65535 and limits
+and timeouts must be positive integers. Use `--no-tarpit`, `--db-enabled`, or
+`--no-fetch-payloads` to override a lower-priority true setting. Database paths
+use the existing `--db` CLI flag. Payload fetching is not implemented: enabling
+`fetch_payloads` is rejected rather than silently ignored.
+
+Local `sshintel.toml`/`sshintel.json` files are Git-ignored and excluded from Docker
+builds because they can contain credentials. Mount a configuration file read-only
+into a container instead. Docker consumes environment variables directly (without
+shell-interpolating credentials); its existing `ENV` defaults take precedence over
+a mounted file. Override those variables as needed or use explicit CLI flags.
+
 ## 🛡️ Connection limits & timeouts
 
 SSHintel guards against resource exhaustion from many concurrent connections or connections kept alive indefinitely. These are configurable via the CLI:

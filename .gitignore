@@ -30,3 +30,7 @@ static/server.key.pub
 coverage.xml
 htmlcov/
 .pytest_cache/
+
+# Local sensor configuration may contain credentials.
+/sshintel.toml
+/sshintel.json

@@ -17,3 +17,6 @@ dist/
 build/
 __pycache__
 *.egg-info
+sshintel.toml
+sshintel.json
+PROJECT_KNOWLEDGE.md

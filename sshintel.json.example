@@ -1,0 +1,15 @@
+{
+  "host": "0.0.0.0",
+  "port": 2222,
+  "username": "user1",
+  "password": "pass123",
+  "tarpit": false,
+  "tarpit_max_seconds": 120,
+  "max_connections": 50,
+  "auth_timeout": 60,
+  "session_idle_timeout": 300,
+  "sensor_id": "sensor-01",
+  "db_path": "data/sshintel.db",
+  "no_db": false,
+  "fetch_payloads": false
+}
