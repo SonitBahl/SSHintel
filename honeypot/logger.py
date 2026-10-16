@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from .telemetry_store import SCHEMA_VERSION
 
 base_dir = Path(__file__).parent.parent
 log_dir = base_dir / 'log_files'
@@ -67,11 +68,14 @@ def utc_now_iso():
 def build_event(event_type, session_id=None, source_ip=None, **extra):
     """Build a structured security event dict from the given fields.
 
+
     ``event_type`` is required; ``session_id`` and ``source_ip`` are the common
     base fields shared by every event. Extra event-specific fields are only
     included when they are not ``None`` so the output stays compact.
     """
     event = {"timestamp": utc_now_iso(), "event_type": event_type}
+    event["schema_version"] = str(SCHEMA_VERSION)
+    event["event_id"] = str(uuid.uuid4())
     # Attach configured sensor identifier when present to enable
     # multi-sensor correlation in downstream analytics.
     if _sensor_id is not None:

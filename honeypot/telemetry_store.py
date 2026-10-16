@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "sshintel.db"
 
@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS events (
     username        TEXT,
     command         TEXT,
     cwd             TEXT,
-    metadata        TEXT
+    metadata        TEXT,
+    event_id        TEXT,
+    schema_version  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -102,11 +104,34 @@ class TelemetryStore:
             self._conn.executescript(CREATE_TABLES_SQL)
             for stmt in INDEXES_SQL:
                 self._conn.execute(stmt)
+            # Idempotent migration: add v2 columns to any pre-existing v1
+            # database without dropping data.
+            self._migrate_to_v2()
             self._conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
             )
             self._conn.commit()
+
+    def _migrate_to_v2(self):
+        """Add ``event_id`` and ``schema_version`` columns to an existing v1 DB.
+
+        ``ALTER TABLE ... ADD COLUMN`` is a no-op-safe migration when the
+        column already exists, but we guard with PRAGMA table_info so the
+        helper is explicitly idempotent and never fails on a partially
+        migrated database.
+        """
+        assert self._conn is not None
+        existing = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(events)")
+        }
+        if "event_id" not in existing:
+            self._conn.execute("ALTER TABLE events ADD COLUMN event_id TEXT")
+        if "schema_version" not in existing:
+            self._conn.execute(
+                "ALTER TABLE events ADD COLUMN schema_version TEXT"
+            )
 
     def log_event(self, event):
         if self._conn is None:
@@ -114,14 +139,16 @@ class TelemetryStore:
         known_keys = {
             "timestamp", "event_type", "session_id", "source_ip",
             "source_port", "username", "command", "cwd",
+            "event_id", "schema_version",
         }
         try:
             metadata = {k: v for k, v in event.items() if k not in known_keys}
             with self._lock:
                 self._conn.execute(
                     "INSERT INTO events (timestamp, event_type, session_id, "
-                    "source_ip, source_port, username, command, cwd, metadata) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "source_ip, source_port, username, command, cwd, metadata, "
+                    "event_id, schema_version) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         event.get("timestamp"),
                         event.get("event_type"),
@@ -132,6 +159,8 @@ class TelemetryStore:
                         event.get("command"),
                         event.get("cwd"),
                         json.dumps(metadata, ensure_ascii=False) if metadata else None,
+                        event.get("event_id"),
+                        event.get("schema_version"),
                     ),
                 )
                 self._conn.commit()
@@ -198,14 +227,14 @@ class TelemetryStore:
             "SELECT COUNT(*) FROM events WHERE event_type='auth_attempt'"
         )
 
-    def failed_auth_attempts(self):
-        return self._query_scalar(
-            "SELECT COUNT(*) FROM events WHERE event_type='auth_failure'"
-        )
-
     def successful_auths(self):
         return self._query_scalar(
             "SELECT COUNT(*) FROM events WHERE event_type='auth_success'"
+        )
+
+    def failed_auth_attempts(self):
+        return self._query_scalar(
+            "SELECT COUNT(*) FROM events WHERE event_type='auth_failure'"
         )
 
     def total_commands(self):
@@ -213,76 +242,39 @@ class TelemetryStore:
             "SELECT COUNT(*) FROM events WHERE event_type='command'"
         )
 
-    def top_usernames(self, limit=10):
-        rows = self._query_all(
-            "SELECT username, COUNT(*) as c FROM events "
-            "WHERE username IS NOT NULL "
-            "GROUP BY username ORDER BY c DESC LIMIT ?",
-            (limit,),
-        )
-        return [{"username": r[0], "count": r[1]} for r in rows]
-
     def top_commands(self, limit=10):
         rows = self._query_all(
-            "SELECT command, COUNT(*) as c FROM events "
-            "WHERE event_type='command' AND command IS NOT NULL "
-            "GROUP BY command ORDER BY c DESC LIMIT ?",
+            "SELECT command, COUNT(*) AS cnt "
+            "FROM events WHERE event_type='command' AND command IS NOT NULL "
+            "GROUP BY command ORDER BY cnt DESC LIMIT ?",
             (limit,),
         )
         return [{"command": r[0], "count": r[1]} for r in rows]
 
     def top_source_ips(self, limit=10):
         rows = self._query_all(
-            "SELECT source_ip, COUNT(*) as c FROM events "
-            "WHERE source_ip IS NOT NULL "
-            "GROUP BY source_ip ORDER BY c DESC LIMIT ?",
+            "SELECT source_ip, COUNT(*) AS cnt "
+            "FROM events WHERE source_ip IS NOT NULL "
+            "GROUP BY source_ip ORDER BY cnt DESC LIMIT ?",
             (limit,),
         )
         return [{"source_ip": r[0], "count": r[1]} for r in rows]
 
-    def get_session_events(self, session_id):
+    def top_usernames(self, limit=10):
         rows = self._query_all(
-            "SELECT timestamp, event_type, session_id, source_ip, "
-            "source_port, username, command, cwd, metadata "
-            "FROM events WHERE session_id=? ORDER BY id ASC",
-            (session_id,),
-        )
-        return [self._row_to_dict(r) for r in rows]
-
-    def get_events_by_ip(self, ip, limit=50):
-        rows = self._query_all(
-            "SELECT timestamp, event_type, session_id, source_ip, "
-            "source_port, username, command, cwd, metadata "
-            "FROM events WHERE source_ip=? ORDER BY id DESC LIMIT ?",
-            (ip, limit),
-        )
-        return [self._row_to_dict(r) for r in rows]
-
-    def get_recent_events(self, limit=50):
-        rows = self._query_all(
-            "SELECT timestamp, event_type, session_id, source_ip, "
-            "source_port, username, command, cwd, metadata "
-            "FROM events ORDER BY id DESC LIMIT ?",
+            "SELECT username, COUNT(*) AS cnt "
+            "FROM events WHERE username IS NOT NULL "
+            "GROUP BY username ORDER BY cnt DESC LIMIT ?",
             (limit,),
         )
-        return [self._row_to_dict(r) for r in rows]
-
-    def get_recent_sessions(self, limit=20):
-        rows = self._query_all(
-            "SELECT session_id, source_ip, username, started_at, ended_at, "
-            "duration, status, disconnect_reason "
-            "FROM sessions ORDER BY started_at DESC LIMIT ?",
-            (limit,),
-        )
-        cols = ["session_id", "source_ip", "username", "started_at",
-                "ended_at", "duration", "status", "disconnect_reason"]
-        return [dict(zip(cols, r)) for r in rows]
+        return [{"username": r[0], "count": r[1]} for r in rows]
 
     def events_in_range(self, start, end, limit=100):
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
-            "source_port, username, command, cwd, metadata "
-            "FROM events WHERE timestamp>=? AND timestamp<=? "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version "
+            "FROM events WHERE timestamp >= ? AND timestamp <= ? "
             "ORDER BY id ASC LIMIT ?",
             (start, end, limit),
         )
@@ -292,31 +284,13 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT session_id, source_ip, username, started_at, ended_at, "
             "duration, status, disconnect_reason "
-            "FROM sessions WHERE started_at>=? AND started_at<=? "
+            "FROM sessions WHERE started_at >= ? AND started_at <= ? "
             "ORDER BY started_at ASC LIMIT ?",
             (start, end, limit),
         )
         cols = ["session_id", "source_ip", "username", "started_at",
                 "ended_at", "duration", "status", "disconnect_reason"]
         return [dict(zip(cols, r)) for r in rows]
-
-    def activity_by_hour(self, hours=24):
-        """Return event counts grouped by hour for the activity chart.
-
-        Returns a list of {"hour": "YYYY-MM-DD HH:00", "count": N} dicts,
-        oldest first, covering the last ``hours`` hours.
-        """
-        rows = self._query_all(
-            "SELECT strftime('%Y-%m-%d %H:00', timestamp) AS hour, "
-            "COUNT(*) AS cnt "
-            "FROM events "
-            "WHERE timestamp >= datetime('now', ?) "
-            "GROUP BY hour ORDER BY hour ASC",
-            (f"-{hours} hours",),
-        )
-        return [{"hour": r[0], "count": r[1]} for r in rows]
-
-    # ---- Session investigation ----
 
     def get_session(self, session_id):
         """Return summary metadata for a single session, or None if unknown."""
@@ -336,7 +310,8 @@ class TelemetryStore:
         """Return all events for a session, ordered chronologically."""
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
-            "source_port, username, command, cwd, metadata "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version "
             "FROM events WHERE session_id = ? "
             "ORDER BY timestamp ASC, id ASC LIMIT ?",
             (session_id, limit),
@@ -351,7 +326,8 @@ class TelemetryStore:
         """
         rows = self._query_all(
             "SELECT id, timestamp, event_type, session_id, source_ip, "
-            "source_port, username, command, cwd, metadata "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version "
             "FROM events WHERE id > ? ORDER BY id ASC LIMIT ?",
             (event_id, limit),
         )
@@ -360,6 +336,48 @@ class TelemetryStore:
     def get_latest_event_id(self):
         """Return the highest event id, or 0 if no events exist."""
         return self._query_scalar("SELECT COALESCE(MAX(id), 0) FROM events")
+
+    def get_recent_events(self, limit=100):
+        rows = self._query_all(
+            "SELECT timestamp, event_type, session_id, source_ip, "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version "
+            "FROM events ORDER BY id DESC LIMIT ?",
+            (limit,),
+        )
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_recent_sessions(self, limit=50):
+        rows = self._query_all(
+            "SELECT session_id, source_ip, username, started_at, ended_at, "
+            "duration, status, disconnect_reason "
+            "FROM sessions ORDER BY started_at DESC LIMIT ?",
+            (limit,),
+        )
+        cols = ["session_id", "source_ip", "username", "started_at",
+                "ended_at", "duration", "status", "disconnect_reason"]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def get_events_by_ip(self, source_ip, limit=100):
+        rows = self._query_all(
+            "SELECT timestamp, event_type, session_id, source_ip, "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version "
+            "FROM events WHERE source_ip = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (source_ip, limit),
+        )
+        return [self._row_to_dict(r) for r in rows]
+
+    def activity_by_hour(self, hours=24):
+        rows = self._query_all(
+            "SELECT strftime('%H', timestamp) AS hour, COUNT(*) AS cnt "
+            "FROM events "
+            "WHERE timestamp >= datetime('now', ?) "
+            "GROUP BY hour ORDER BY hour ASC",
+            (f"-{hours} hours",),
+        )
+        return [{"hour": r[0], "count": r[1]} for r in rows]
 
     # ---- Internal helpers ----
 
@@ -389,7 +407,8 @@ class TelemetryStore:
     @staticmethod
     def _row_to_dict(row, include_id=False):
         keys = ["timestamp", "event_type", "session_id", "source_ip",
-                "source_port", "username", "command", "cwd", "metadata"]
+                "source_port", "username", "command", "cwd", "metadata",
+                "event_id", "schema_version"]
         if include_id:
             keys = ["id"] + keys
         d = dict(zip(keys, row))
