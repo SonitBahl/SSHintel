@@ -13,7 +13,8 @@ class TestBuildEvent:
             session_id='abc-123',
             source_ip='127.0.0.1',
         )
-        assert event['event_type'] == 'connect'
+        assert event['event_type'] == 'session.started'
+        assert event['legacy_event_type'] == 'connect'
         assert event['session_id'] == 'abc-123'
         assert event['source_ip'] == '127.0.0.1'
         assert 'timestamp' in event
@@ -27,7 +28,8 @@ class TestBuildEvent:
             password='toor',
             auth_method='password',
         )
-        assert event['event_type'] == 'auth_attempt'
+        assert event['event_type'] == 'auth.attempted'
+        assert event['legacy_event_type'] == 'auth_attempt'
         assert event['username'] == 'root'
         assert event['password'] == 'toor'
         assert event['auth_method'] == 'password'
@@ -39,7 +41,8 @@ class TestBuildEvent:
             source_ip='10.0.0.1',
             username='user1',
         )
-        assert event['event_type'] == 'auth_success'
+        assert event['event_type'] == 'auth.succeeded'
+        assert event['legacy_event_type'] == 'auth_success'
         assert event['username'] == 'user1'
 
     def test_auth_failure_event(self):
@@ -49,7 +52,8 @@ class TestBuildEvent:
             source_ip='10.0.0.1',
             username='admin',
         )
-        assert event['event_type'] == 'auth_failure'
+        assert event['event_type'] == 'auth.failed'
+        assert event['legacy_event_type'] == 'auth_failure'
         assert event['username'] == 'admin'
 
     def test_command_event(self):
@@ -61,7 +65,8 @@ class TestBuildEvent:
             command='ls -la',
             cwd='/home/user1',
         )
-        assert event['event_type'] == 'command'
+        assert event['event_type'] == 'command.executed'
+        assert event['legacy_event_type'] == 'command'
         assert event['command'] == 'ls -la'
         assert event['cwd'] == '/home/user1'
 
@@ -74,7 +79,8 @@ class TestBuildEvent:
             auth_result='success',
             duration_seconds=43.21,
         )
-        assert event['event_type'] == 'disconnect'
+        assert event['event_type'] == 'session.disconnected'
+        assert event['legacy_event_type'] == 'disconnect'
         assert event['duration_seconds'] == 43.21
         assert event['auth_result'] == 'success'
 
@@ -84,7 +90,8 @@ class TestBuildEvent:
             session_id='abc',
             source_ip='10.0.0.1',
         )
-        assert event['event_type'] == 'tarpit'
+        assert event['event_type'] == 'session.tarpit'
+        assert event['legacy_event_type'] == 'tarpit'
 
     def test_connection_rejected_event(self):
         event = build_event(
@@ -93,7 +100,8 @@ class TestBuildEvent:
             source_ip='10.0.0.1',
             reason='connection_limit',
         )
-        assert event['event_type'] == 'connection_rejected'
+        assert event['event_type'] == 'session.rejected'
+        assert event['legacy_event_type'] == 'connection_rejected'
         assert event['reason'] == 'connection_limit'
 
     def test_extra_fields_preserved(self):

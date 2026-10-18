@@ -17,8 +17,31 @@ import threading
 from pathlib import Path
 from typing import Any
 
+# Flat (v1/v2) event-type names → dotted (v3) namespace names.
+# The dotted form is stored in ``event_type``; the original flat name is
+# preserved in ``legacy_event_type`` for backward compatibility.
+EVENT_TYPES = {
+    'connect': 'session.started',
+    'auth_attempt': 'auth.attempted',
+    'auth_success': 'auth.succeeded',
+    'auth_failure': 'auth.failed',
+    'command': 'command.executed',
+    'disconnect': 'session.disconnected',
+    'tarpit': 'session.tarpit',
+    'connection_rejected': 'session.rejected',
+}
 
-SCHEMA_VERSION = 2
+
+def normalize_event_type(event_type):
+    """Return the dotted namespace name for a flat event type.
+
+    Unknown event types are returned unchanged so custom event types pass
+    through without modification.
+    """
+    return EVENT_TYPES.get(event_type, event_type)
+
+
+SCHEMA_VERSION = 3
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "sshintel.db"
 
@@ -35,7 +58,8 @@ CREATE TABLE IF NOT EXISTS events (
     cwd             TEXT,
     metadata        TEXT,
     event_id        TEXT,
-    schema_version  TEXT
+    schema_version  TEXT,
+    legacy_event_type TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -61,6 +85,7 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);",
     "CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);",
     "CREATE INDEX IF NOT EXISTS idx_events_username ON events(username);",
+    "CREATE INDEX IF NOT EXISTS idx_events_legacy_event_type ON events(legacy_event_type);",
     "CREATE INDEX IF NOT EXISTS idx_sessions_source_ip ON sessions(source_ip);",
     "CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);",
 ]
@@ -102,24 +127,25 @@ class TelemetryStore:
         assert self._conn is not None
         with self._lock:
             self._conn.executescript(CREATE_TABLES_SQL)
+            # Idempotent migration: add v2/v3 columns to any pre-existing
+            # database without dropping data. Must run before indexes so the
+            # new columns exist when indexes are created.
+            self._migrate_to_v3()
             for stmt in INDEXES_SQL:
                 self._conn.execute(stmt)
-            # Idempotent migration: add v2 columns to any pre-existing v1
-            # database without dropping data.
-            self._migrate_to_v2()
             self._conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
             )
             self._conn.commit()
 
-    def _migrate_to_v2(self):
-        """Add ``event_id`` and ``schema_version`` columns to an existing v1 DB.
+    def _migrate_to_v3(self):
+        """Add ``event_id``, ``schema_version``, and ``legacy_event_type``
+        columns to any pre-existing database without dropping data.
 
-        ``ALTER TABLE ... ADD COLUMN`` is a no-op-safe migration when the
-        column already exists, but we guard with PRAGMA table_info so the
-        helper is explicitly idempotent and never fails on a partially
-        migrated database.
+        ``ALTER TABLE ... ADD COLUMN`` is guarded with ``PRAGMA table_info``
+        so the helper is explicitly idempotent and never fails on a partially
+        migrated database (v1, v2, or already-migrated v3).
         """
         assert self._conn is not None
         existing = {
@@ -132,14 +158,26 @@ class TelemetryStore:
             self._conn.execute(
                 "ALTER TABLE events ADD COLUMN schema_version TEXT"
             )
+        if "legacy_event_type" not in existing:
+            self._conn.execute(
+                "ALTER TABLE events ADD COLUMN legacy_event_type TEXT"
+            )
 
     def log_event(self, event):
         if self._conn is None:
             return
+        # Normalize flat event-type names to dotted form and preserve the
+        # original flat name as legacy_event_type for backward compatibility.
+        event_type = event.get("event_type")
+        dotted = normalize_event_type(event_type)
+        event["event_type"] = dotted
+        if dotted != event_type and not event.get("legacy_event_type"):
+            event["legacy_event_type"] = event_type
+
         known_keys = {
             "timestamp", "event_type", "session_id", "source_ip",
             "source_port", "username", "command", "cwd",
-            "event_id", "schema_version",
+            "event_id", "schema_version", "legacy_event_type",
         }
         try:
             metadata = {k: v for k, v in event.items() if k not in known_keys}
@@ -147,8 +185,8 @@ class TelemetryStore:
                 self._conn.execute(
                     "INSERT INTO events (timestamp, event_type, session_id, "
                     "source_ip, source_port, username, command, cwd, metadata, "
-                    "event_id, schema_version) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "event_id, schema_version, legacy_event_type) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         event.get("timestamp"),
                         event.get("event_type"),
@@ -161,6 +199,7 @@ class TelemetryStore:
                         json.dumps(metadata, ensure_ascii=False) if metadata else None,
                         event.get("event_id"),
                         event.get("schema_version"),
+                        event.get("legacy_event_type"),
                     ),
                 )
                 self._conn.commit()
@@ -224,28 +263,28 @@ class TelemetryStore:
 
     def total_auth_attempts(self):
         return self._query_scalar(
-            "SELECT COUNT(*) FROM events WHERE event_type='auth_attempt'"
+            "SELECT COUNT(*) FROM events WHERE legacy_event_type='auth_attempt'"
         )
 
     def successful_auths(self):
         return self._query_scalar(
-            "SELECT COUNT(*) FROM events WHERE event_type='auth_success'"
+            "SELECT COUNT(*) FROM events WHERE legacy_event_type='auth_success'"
         )
 
     def failed_auth_attempts(self):
         return self._query_scalar(
-            "SELECT COUNT(*) FROM events WHERE event_type='auth_failure'"
+            "SELECT COUNT(*) FROM events WHERE legacy_event_type='auth_failure'"
         )
 
     def total_commands(self):
         return self._query_scalar(
-            "SELECT COUNT(*) FROM events WHERE event_type='command'"
+            "SELECT COUNT(*) FROM events WHERE legacy_event_type='command'"
         )
 
     def top_commands(self, limit=10):
         rows = self._query_all(
             "SELECT command, COUNT(*) AS cnt "
-            "FROM events WHERE event_type='command' AND command IS NOT NULL "
+            "FROM events WHERE legacy_event_type='command' AND command IS NOT NULL "
             "GROUP BY command ORDER BY cnt DESC LIMIT ?",
             (limit,),
         )
@@ -273,7 +312,7 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
             "source_port, username, command, cwd, metadata, "
-            "event_id, schema_version "
+            "event_id, schema_version, legacy_event_type "
             "FROM events WHERE timestamp >= ? AND timestamp <= ? "
             "ORDER BY id ASC LIMIT ?",
             (start, end, limit),
@@ -311,7 +350,7 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
             "source_port, username, command, cwd, metadata, "
-            "event_id, schema_version "
+            "event_id, schema_version, legacy_event_type "
             "FROM events WHERE session_id = ? "
             "ORDER BY timestamp ASC, id ASC LIMIT ?",
             (session_id, limit),
@@ -341,7 +380,7 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
             "source_port, username, command, cwd, metadata, "
-            "event_id, schema_version "
+            "event_id, schema_version, legacy_event_type "
             "FROM events ORDER BY id DESC LIMIT ?",
             (limit,),
         )
@@ -362,7 +401,7 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
             "source_port, username, command, cwd, metadata, "
-            "event_id, schema_version "
+            "event_id, schema_version, legacy_event_type "
             "FROM events WHERE source_ip = ? "
             "ORDER BY id DESC LIMIT ?",
             (source_ip, limit),
@@ -408,7 +447,7 @@ class TelemetryStore:
     def _row_to_dict(row, include_id=False):
         keys = ["timestamp", "event_type", "session_id", "source_ip",
                 "source_port", "username", "command", "cwd", "metadata",
-                "event_id", "schema_version"]
+                "event_id", "schema_version", "legacy_event_type"]
         if include_id:
             keys = ["id"] + keys
         d = dict(zip(keys, row))

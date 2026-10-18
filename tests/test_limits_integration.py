@@ -147,12 +147,11 @@ class TestLimitsIntegration(unittest.TestCase):
         reasons = [
             e.get("reason")
             for e in _events_since(mark)
-            if e.get("event_type") == "disconnect"
+            if e.get("legacy_event_type") == "disconnect"
         ]
         self.assertIn("idle_timeout", reasons)
 
     # --- Test 5: an active session keeps working ---------------------------
-    def test_active_session_does_not_time_out(self):
         mark = logger.utc_now_iso()
         c = _connect(self.port)
         shell = _invoke_shell(c)
@@ -170,7 +169,7 @@ class TestLimitsIntegration(unittest.TestCase):
         reasons = [
             e.get("reason")
             for e in _events_since(mark)
-            if e.get("event_type") == "disconnect"
+            if e.get("legacy_event_type") == "disconnect"
         ]
         self.assertNotIn("idle_timeout", reasons)
 
@@ -198,7 +197,7 @@ class TestLimitsIntegration(unittest.TestCase):
         events = _events_since(mark)
         self.assertTrue(
             any(
-                e.get("event_type") == "connection_rejected"
+                e.get("legacy_event_type") == "connection_rejected"
                 and e.get("reason") == "connection_limit"
                 for e in events
             ),
@@ -228,7 +227,7 @@ class TestLimitsIntegration(unittest.TestCase):
         reasons = [
             e.get("reason")
             for e in _events_since(mark)
-            if e.get("event_type") == "disconnect"
+            if e.get("legacy_event_type") == "disconnect"
         ]
         self.assertIn("auth_timeout", reasons)
         self.assertNotIn("idle_timeout", reasons)
@@ -259,7 +258,7 @@ class TestLimitsIntegration(unittest.TestCase):
         self.assertTrue(first, "tarpit sent no banner output")
         c.close()
         events = _events_since(mark)
-        self.assertTrue(any(e.get("event_type") == "tarpit" for e in events))
+        self.assertTrue(any(e.get("legacy_event_type") == "tarpit" for e in events))
 
     # --- Test 10: tarpit slot frees quickly -------------------------------
     def test_tarpit_session_releases_slot_promptly(self):

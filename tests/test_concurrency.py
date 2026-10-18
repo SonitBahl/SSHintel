@@ -122,8 +122,8 @@ def test_concurrent_sessions_abrupt_disconnect_and_slot_recovery(sensor):
                 client.close()
         wait_until(lambda: rows("SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL")[0][0] == 0)
     assert rows("SELECT COUNT(*) FROM sessions")[0][0] == 12
-    assert rows("SELECT COUNT(*) FROM events WHERE event_type='disconnect'")[0][0] == 12
-    assert rows("SELECT COUNT(*) FROM events WHERE event_type='command'")[0][0] == 12
+    assert rows("SELECT COUNT(*) FROM events WHERE legacy_event_type='disconnect'")[0][0] == 12
+    assert rows("SELECT COUNT(*) FROM events WHERE legacy_event_type='command'")[0][0] == 12
     process.send_signal(signal.SIGINT)
     assert process.wait(timeout=8) == 0
     assert "LIVE_THREADS=[]" in text()
@@ -143,7 +143,7 @@ def test_sigint_drains_connections_before_closing_store(sensor):
         # the CLI itself must not leak KeyboardInterrupt on normal shutdown.
         assert "KeyboardInterrupt" not in text()
         assert rows("SELECT COUNT(*) FROM sessions WHERE ended_at IS NULL")[0][0] == 0
-        assert rows("SELECT COUNT(*) FROM events WHERE event_type='disconnect'")[0][0] == 2
+        assert rows("SELECT COUNT(*) FROM events WHERE legacy_event_type='disconnect'")[0][0] == 2
         assert rows("PRAGMA integrity_check") == [("ok",)]
         assert "SQLite telemetry error" not in text()
     finally:

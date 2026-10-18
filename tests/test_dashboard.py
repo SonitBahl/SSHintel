@@ -329,7 +329,7 @@ class TestSessionInvestigation:
     def test_session_command_count(self, client):
         response = client.get("/api/session/sess-001")
         data = json.loads(response.data)
-        commands = [e for e in data["events"] if e["event_type"] == "command"]
+        commands = [e for e in data["events"] if e.get("legacy_event_type") == "command"]
         assert len(commands) == 2
         assert commands[0]["command"] == "ls -la"
         assert commands[1]["command"] == "cat /etc/passwd"
@@ -339,7 +339,7 @@ class TestSessionInvestigation:
         assert response.status_code == 200
         data = json.loads(response.data)
         assert data["session"]["status"] == "closed"
-        auth_events = [e for e in data["events"] if e["event_type"] == "auth_failure"]
+        auth_events = [e for e in data["events"] if e.get("legacy_event_type") == "auth_failure"]
         assert len(auth_events) == 1
 
     def test_session_events_no_disconnect(self, tmp_path):

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from .telemetry_store import SCHEMA_VERSION
+from .telemetry_store import EVENT_TYPES, SCHEMA_VERSION
 
 base_dir = Path(__file__).parent.parent
 log_dir = base_dir / 'log_files'
@@ -54,6 +54,22 @@ event_handler = RotatingFileHandler(
 event_handler.setFormatter(logging_format)
 event_logger.addHandler(event_handler)
 
+# Flat (v1/v2) event-type names → dotted (v3) namespace names.
+# The dotted form is emitted in ``event_type``; the original flat name is
+# preserved in ``legacy_event_type`` so existing queries and dashboards keep
+# working during the transition.
+# (Defined in honeypot/telemetry_store.py and imported above to avoid a
+# circular import.)
+
+
+def dotted_event_type(event_type):
+    """Return the dotted namespace name for a flat event type.
+
+    Unknown event types are returned unchanged so custom event types pass
+    through without modification.
+    """
+    return EVENT_TYPES.get(event_type, event_type)
+
 
 def new_session_id():
     """Return a unique identifier for a connection/session (UUID4, as a string)."""
@@ -73,7 +89,14 @@ def build_event(event_type, session_id=None, source_ip=None, **extra):
     base fields shared by every event. Extra event-specific fields are only
     included when they are not ``None`` so the output stays compact.
     """
-    event = {"timestamp": utc_now_iso(), "event_type": event_type}
+    # Translate flat event-type names to the dotted namespace; preserve the
+    # original flat name as legacy_event_type for backward compatibility.
+    dotted = dotted_event_type(event_type)
+    event = {
+        "timestamp": utc_now_iso(),
+        "event_type": dotted,
+        "legacy_event_type": event_type if dotted != event_type else None,
+    }
     event["schema_version"] = str(SCHEMA_VERSION)
     event["event_id"] = str(uuid.uuid4())
     # Attach configured sensor identifier when present to enable

@@ -25,9 +25,16 @@ def _synthesize_session(events):
     # Find the most common non-empty source_ip
     ips = [e.get("source_ip") for e in events if e.get("source_ip")]
     source_ip = max(set(ips), key=ips.count) if ips else ""
-    # Determine auth result from events
-    auth_success = any(e.get("event_type") == "auth_success" for e in events)
-    auth_failure = any(e.get("event_type") == "auth_failure" for e in events)
+    # Determine auth result from events (accept both dotted v3 names and
+    # flat legacy names for backward compatibility).
+    def _is_auth_event(event, kind):
+        return (
+            event.get("event_type") == kind
+            or event.get("legacy_event_type") == kind
+        )
+
+    auth_success = any(_is_auth_event(e, "auth.succeeded") or _is_auth_event(e, "auth_success") for e in events)
+    auth_failure = any(_is_auth_event(e, "auth.failed") or _is_auth_event(e, "auth_failure") for e in events)
     if auth_success:
         status = "success"
     elif auth_failure:

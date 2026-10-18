@@ -18,7 +18,8 @@ class TestSerializeEvent:
         event = build_event('command', session_id='abc', source_ip='127.0.0.1', command='ls')
         result = serialize_event(event)
         parsed = json.loads(result)
-        assert parsed['event_type'] == 'command'
+        assert parsed['event_type'] == 'command.executed'
+        assert parsed['legacy_event_type'] == 'command'
 
     def test_json_has_double_quotes(self):
         event = build_event('connect', session_id='abc', source_ip='127.0.0.1')

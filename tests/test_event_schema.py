@@ -172,20 +172,22 @@ class TestV1ToV2Migration:
     def test_migration_adds_columns_and_preserves_data(self, tmp_db):
         self._make_v1_db(tmp_db)
 
-        # Confirm the fixture is a genuine v1 DB (no v2 columns yet).
+        # Confirm the fixture is a genuine v1 DB (no v2/v3 columns yet).
         conn = sqlite3.connect(tmp_db)
         cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
         conn.close()
         assert "event_id" not in cols
         assert "schema_version" not in cols
+        assert "legacy_event_type" not in cols
 
         store = TelemetryStore(tmp_db)
         store.open()
 
-        # Migration added the v2 columns.
+        # Migration added the v2/v3 columns.
         cols = {row[1] for row in store._conn.execute("PRAGMA table_info(events)")}
         assert "event_id" in cols
         assert "schema_version" in cols
+        assert "legacy_event_type" in cols
 
         # Schema version bumped to 2.
         ver = store._conn.execute(
@@ -209,5 +211,6 @@ class TestV1ToV2Migration:
         cols = {row[1] for row in store._conn.execute("PRAGMA table_info(events)")}
         assert "event_id" in cols
         assert "schema_version" in cols
+        assert "legacy_event_type" in cols
         assert store.count_events() == 2
         store.close()

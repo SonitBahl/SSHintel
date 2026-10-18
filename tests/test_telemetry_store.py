@@ -105,7 +105,10 @@ class TestEventInsertion:
             "source_ip": "10.0.0.1",
         })
         row = store._conn.execute("SELECT event_type, session_id, source_ip FROM events").fetchone()
-        assert row == ("connect", "abc", "10.0.0.1")
+        assert row == ("session.started", "abc", "10.0.0.1")
+
+        row = store._conn.execute("SELECT legacy_event_type FROM events WHERE session_id='abc'").fetchone()
+        assert row[0] == "connect"
 
     def test_insert_auth_attempt_event(self, store):
         store.log_event({
@@ -120,7 +123,7 @@ class TestEventInsertion:
         row = store._conn.execute(
             "SELECT event_type, username, command FROM events WHERE session_id='abc'"
         ).fetchone()
-        assert row[0] == "auth_attempt"
+        assert row[0] == "auth.attempted"
         assert row[1] == "root"
         assert row[2] is None
 
@@ -135,9 +138,12 @@ class TestEventInsertion:
             "cwd": "/home/root",
         })
         row = store._conn.execute(
-            "SELECT command, cwd FROM events WHERE event_type='command'"
+            "SELECT command, cwd, event_type, legacy_event_type FROM events WHERE legacy_event_type='command'"
         ).fetchone()
-        assert row == ("ls -la", "/home/root")
+        assert row[0] == "ls -la"
+        assert row[1] == "/home/root"
+        assert row[2] == "command.executed"
+        assert row[3] == "command"
 
     def test_insert_disconnect_event(self, store):
         store.log_event({
@@ -150,9 +156,9 @@ class TestEventInsertion:
             "reason": None,
         })
         row = store._conn.execute(
-            "SELECT event_type, username FROM events WHERE event_type='disconnect'"
+            "SELECT event_type, username FROM events WHERE legacy_event_type='disconnect'"
         ).fetchone()
-        assert row == ("disconnect", "root")
+        assert row == ("session.disconnected", "root")
 
     def test_insert_connection_rejected_event(self, store):
         store.log_event({
@@ -162,9 +168,9 @@ class TestEventInsertion:
             "reason": "connection_limit",
         })
         row = store._conn.execute(
-            "SELECT event_type, source_ip, metadata FROM events WHERE event_type='connection_rejected'"
+            "SELECT event_type, source_ip, metadata FROM events WHERE legacy_event_type='connection_rejected'"
         ).fetchone()
-        assert row[0] == "connection_rejected"
+        assert row[0] == "session.rejected"
         assert row[1] == "10.0.0.2"
         meta = json.loads(row[2])
         assert meta["reason"] == "connection_limit"
@@ -177,9 +183,9 @@ class TestEventInsertion:
             "source_ip": "10.0.0.1",
         })
         row = store._conn.execute(
-            "SELECT event_type FROM events WHERE event_type='tarpit'"
+            "SELECT event_type, legacy_event_type FROM events WHERE legacy_event_type='tarpit'"
         ).fetchone()
-        assert row[0] == "tarpit"
+        assert row == ("session.tarpit", "tarpit")
 
     def test_multiple_events_preserve_values(self, store):
         events = [
@@ -204,7 +210,7 @@ class TestEventInsertion:
             "extra_field": "should_go_to_metadata",
         })
         raw = store._conn.execute(
-            "SELECT metadata FROM events WHERE event_type='command'"
+            "SELECT metadata FROM events WHERE legacy_event_type='command'"
         ).fetchone()[0]
         meta = json.loads(raw)
         assert meta["extra_field"] == "should_go_to_metadata"
@@ -345,9 +351,9 @@ class TestQueries:
         rows = populated.get_session_events("s1")
         assert len(rows) == 6
         types = [r["event_type"] for r in rows]
-        assert "connect" in types
-        assert "command" in types
-        assert "disconnect" in types
+        assert "session.started" in types
+        assert "command.executed" in types
+        assert "session.disconnected" in types
 
     def test_get_events_by_ip(self, populated):
         rows = populated.get_events_by_ip("10.0.0.2")
