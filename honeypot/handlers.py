@@ -80,6 +80,7 @@ def emulated_shell(channel, session, idle_timeout=300, tarpit=False,
                 'command',
                 session_id=session.session_id,
                 source_ip=session.source_ip,
+                source_port=session.source_port,
                 username=session.username,
                 command=cmd_line,
                 cwd=session.cwd,
@@ -142,9 +143,9 @@ def client_handle(client, addr, username, password, tarpit=False,
                   auth_timeout=60, session_idle_timeout=300, max_connections=50,
                   tarpit_max_seconds=120):
     client_ip = addr[0]
-    session = Session(source_ip=client_ip)
+    session = Session(source_ip=client_ip, source_port=addr[1])
     print(f"{client_ip} connected to server.")
-    log_event('connect', session_id=session.session_id, source_ip=session.source_ip)
+    log_event('connect', session_id=session.session_id, source_ip=session.source_ip, source_port=addr[1])
     record_session_connect(session.session_id, session.source_ip, session.connected_at)
     in_auth_phase = True
     transport = None
@@ -177,7 +178,7 @@ def client_handle(client, addr, username, password, tarpit=False,
 
         banner = "Welcome to Ubuntu 22.04 LTS!\r\n\r\n"
         if tarpit:
-            log_event('tarpit', session_id=session.session_id, source_ip=session.source_ip)
+            log_event('tarpit', session_id=session.session_id, source_ip=session.source_ip, source_port=addr[1])
         channel.send(banner)
         emulated_shell(channel, session, idle_timeout=session_idle_timeout,
                        tarpit=tarpit)
@@ -209,6 +210,7 @@ def client_handle(client, addr, username, password, tarpit=False,
             'disconnect',
             session_id=session.session_id,
             source_ip=session.source_ip,
+            source_port=addr[1],
             username=session.username,
             auth_result=session.auth_result,
             duration_seconds=session.duration_seconds,

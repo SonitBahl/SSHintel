@@ -51,7 +51,7 @@ def honeypot(address='0.0.0.0', port=2222, username=None, password=None, tarpit=
             workers = {t: conn for t, conn in workers.items() if t.is_alive()}
             if not limiter.try_acquire():
                 try:
-                    log_event('connection_rejected', source_ip=addr[0], reason='connection_limit')
+                    log_event('connection_rejected', source_ip=addr[0], source_port=addr[1], reason='connection_limit')
                 finally:
                     _close_client(client)
                 continue

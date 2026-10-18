@@ -520,3 +520,236 @@ class TestSecurity:
             "injected": "'; DELETE FROM events; --",
         })
         assert store.count_events() == 1
+
+
+# ---------------------------------------------------------------------------
+# sensor_id and source_port (Commit 07)
+# ---------------------------------------------------------------------------
+
+
+class TestSensorIdAndSourcePort:
+    def test_schema_version_is_4(self, store):
+        ver = store._conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()[0]
+        assert ver == str(SCHEMA_VERSION)
+
+    def test_sensor_id_column_exists(self, store):
+        cols = {
+            row[1]
+            for row in store._conn.execute("PRAGMA table_info(events)")
+        }
+        assert "sensor_id" in cols
+
+    def test_source_port_is_populated(self, store):
+        store.log_event({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "event_type": "connect",
+            "session_id": "s1",
+            "source_ip": "10.0.0.1",
+            "source_port": 42222,
+        })
+        row = store._conn.execute(
+            "SELECT source_port FROM events WHERE session_id='s1'"
+        ).fetchone()
+        assert row[0] == 42222
+
+    def test_sensor_id_is_stored_and_queryable(self, store):
+        store.log_event({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "event_type": "connect",
+            "session_id": "s1",
+            "source_ip": "10.0.0.1",
+            "sensor_id": "sensor-alpha",
+        })
+        row = store._conn.execute(
+            "SELECT sensor_id FROM events WHERE session_id='s1'"
+        ).fetchone()
+        assert row[0] == "sensor-alpha"
+
+    def test_get_events_by_sensor(self, store):
+        store.log_event({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "event_type": "connect",
+            "session_id": "s1",
+            "source_ip": "10.0.0.1",
+            "sensor_id": "sensor-alpha",
+        })
+        store.log_event({
+            "timestamp": "2026-01-01T00:00:01Z",
+            "event_type": "connect",
+            "session_id": "s2",
+            "source_ip": "10.0.0.2",
+            "sensor_id": "sensor-beta",
+        })
+        store.log_event({
+            "timestamp": "2026-01-01T00:00:02Z",
+            "event_type": "command",
+            "session_id": "s1",
+            "source_ip": "10.0.0.1",
+            "sensor_id": "sensor-alpha",
+        })
+
+        events = store.get_events_by_sensor("sensor-alpha")
+        assert len(events) == 2
+        assert all(e["sensor_id"] == "sensor-alpha" for e in events)
+
+        events = store.get_events_by_sensor("sensor-beta")
+        assert len(events) == 1
+        assert events[0]["sensor_id"] == "sensor-beta"
+
+    def test_get_events_by_sensor_empty(self, store):
+        assert store.get_events_by_sensor("nonexistent") == []
+
+    def test_get_events_by_port(self, store):
+        store.log_event({
+            "timestamp": "2026-01-01T00:00:00Z",
+            "event_type": "connect",
+            "session_id": "s1",
+            "source_ip": "10.0.0.1",
+            "source_port": 54321,
+        })
+        store.log_event({
+            "timestamp": "2026-01-01T00:00:01Z",
+            "event_type": "command",
+            "session_id": "s1",
+            "source_ip": "10.0.0.1",
+            "source_port": 54321,
+        })
+        store.log_event({
+            "timestamp": "2026-01-01T00:00:02Z",
+            "event_type": "connect",
+            "session_id": "s2",
+            "source_ip": "10.0.0.2",
+            "source_port": 12345,
+        })
+
+        events = store.get_events_by_port(54321)
+        assert len(events) == 2
+        assert all(e["source_port"] == 54321 for e in events)
+
+        events = store.get_events_by_port(12345)
+        assert len(events) == 1
+        assert events[0]["source_port"] == 12345
+
+    def test_get_events_by_port_empty(self, store):
+        assert store.get_events_by_port(99999) == []
+
+    def test_sensor_id_index_exists(self, store):
+        indexes = {
+            row[0]
+            for row in store._conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+            ).fetchall()
+        }
+        assert "idx_events_sensor_id" in indexes
+        assert "idx_events_source_port" in indexes
+
+
+# ---------------------------------------------------------------------------
+# Migration v3 -> v4
+# ---------------------------------------------------------------------------
+
+
+class TestMigrationV3ToV4:
+    def _make_v3_db(self, path):
+        """Create a pre-v4 database with event_id/schema_version/legacy_event_type
+        but without sensor_id, populated with two rows and schema_version = 3."""
+        conn = sqlite3.connect(path)
+        conn.execute(
+            "CREATE TABLE events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "timestamp TEXT NOT NULL,"
+            "event_type TEXT NOT NULL,"
+            "session_id TEXT,"
+            "source_ip TEXT,"
+            "source_port INTEGER,"
+            "username TEXT,"
+            "command TEXT,"
+            "cwd TEXT,"
+            "metadata TEXT,"
+            "event_id TEXT,"
+            "schema_version TEXT,"
+            "legacy_event_type TEXT"
+            ")"
+        )
+        conn.execute(
+            "CREATE TABLE sessions ("
+            "session_id TEXT PRIMARY KEY,"
+            "source_ip TEXT,"
+            "username TEXT,"
+            "started_at TEXT,"
+            "ended_at TEXT,"
+            "duration REAL,"
+            "status TEXT,"
+            "disconnect_reason TEXT"
+            ")"
+        )
+        conn.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT)")
+        conn.execute(
+            "INSERT INTO events (timestamp, event_type, session_id, source_ip, "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version, legacy_event_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "2026-01-01T00:00:00Z", "connect", "s1", "10.0.0.1", None,
+                None, None, None, None, "eee-111", "3", "connect",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO events (timestamp, event_type, session_id, source_ip, "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version, legacy_event_type) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "2026-01-01T00:01:00Z", "command", "s1", "10.0.0.1", None,
+                "root", "ls", "/", None, "eee-222", "3", "command",
+            ),
+        )
+        conn.execute(
+            "INSERT INTO meta(key, value) VALUES('schema_version', '3')"
+        )
+        conn.commit()
+        conn.close()
+
+    def test_migration_adds_sensor_id_column(self, tmp_db):
+        self._make_v3_db(tmp_db)
+
+        conn = sqlite3.connect(tmp_db)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(events)")}
+        conn.close()
+        assert "sensor_id" not in cols
+
+        store = TelemetryStore(tmp_db)
+        store.open()
+
+        cols = {
+            row[1]
+            for row in store._conn.execute("PRAGMA table_info(events)")
+        }
+        assert "sensor_id" in cols
+
+        ver = store._conn.execute(
+            "SELECT value FROM meta WHERE key='schema_version'"
+        ).fetchone()[0]
+        assert ver == str(SCHEMA_VERSION)
+
+        assert store.count_events() == 2
+        rows = store._conn.execute(
+            "SELECT event_type, session_id FROM events ORDER BY id"
+        ).fetchall()
+        assert rows == [("connect", "s1"), ("command", "s1")]
+        store.close()
+
+    def test_migration_is_idempotent(self, tmp_db):
+        self._make_v3_db(tmp_db)
+        store = TelemetryStore(tmp_db)
+        store.open()
+        store.open()  # second open re-runs _create_schema + migration
+        cols = {
+            row[1]
+            for row in store._conn.execute("PRAGMA table_info(events)")
+        }
+        assert "sensor_id" in cols
+        assert store.count_events() == 2
+        store.close()

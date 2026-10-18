@@ -152,6 +152,7 @@ class TestLimitsIntegration(unittest.TestCase):
         self.assertIn("idle_timeout", reasons)
 
     # --- Test 5: an active session keeps working ---------------------------
+    def test_active_session_survives(self):
         mark = logger.utc_now_iso()
         c = _connect(self.port)
         shell = _invoke_shell(c)

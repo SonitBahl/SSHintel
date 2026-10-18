@@ -49,6 +49,10 @@ class Session:
     # Each Session gets its own independent copy created by ``create_filesystem``.
     fake_filesystem: dict = field(default_factory=create_filesystem)
     cwd: str = "/home/user1"
+    # Remote TCP port of the client (from addr[1] at accept time). Recorded on
+    # connect so per-command events can populate source_port without needing
+    # access to the socket address tuple.
+    source_port: Optional[int] = None
     _connected_mono: float = field(
         default_factory=time.monotonic, init=False, repr=False, compare=False
     )

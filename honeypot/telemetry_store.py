@@ -41,7 +41,7 @@ def normalize_event_type(event_type):
     return EVENT_TYPES.get(event_type, event_type)
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 DEFAULT_DB_PATH = Path(__file__).parent.parent / "data" / "sshintel.db"
 
@@ -59,7 +59,8 @@ CREATE TABLE IF NOT EXISTS events (
     metadata        TEXT,
     event_id        TEXT,
     schema_version  TEXT,
-    legacy_event_type TEXT
+    legacy_event_type TEXT,
+    sensor_id       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -86,6 +87,8 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_events_source_ip ON events(source_ip);",
     "CREATE INDEX IF NOT EXISTS idx_events_username ON events(username);",
     "CREATE INDEX IF NOT EXISTS idx_events_legacy_event_type ON events(legacy_event_type);",
+    "CREATE INDEX IF NOT EXISTS idx_events_sensor_id ON events(sensor_id);",
+    "CREATE INDEX IF NOT EXISTS idx_events_source_port ON events(source_port);",
     "CREATE INDEX IF NOT EXISTS idx_sessions_source_ip ON sessions(source_ip);",
     "CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);",
 ]
@@ -127,10 +130,10 @@ class TelemetryStore:
         assert self._conn is not None
         with self._lock:
             self._conn.executescript(CREATE_TABLES_SQL)
-            # Idempotent migration: add v2/v3 columns to any pre-existing
+            # Idempotent migration: add v2/v3/v4 columns to any pre-existing
             # database without dropping data. Must run before indexes so the
             # new columns exist when indexes are created.
-            self._migrate_to_v3()
+            self._migrate_to_v4()
             for stmt in INDEXES_SQL:
                 self._conn.execute(stmt)
             self._conn.execute(
@@ -139,13 +142,13 @@ class TelemetryStore:
             )
             self._conn.commit()
 
-    def _migrate_to_v3(self):
-        """Add ``event_id``, ``schema_version``, and ``legacy_event_type``
-        columns to any pre-existing database without dropping data.
+    def _migrate_to_v4(self):
+        """Add ``event_id``, ``schema_version``, ``legacy_event_type``, and
+        ``sensor_id`` columns to any pre-existing database without dropping data.
 
         ``ALTER TABLE ... ADD COLUMN`` is guarded with ``PRAGMA table_info``
         so the helper is explicitly idempotent and never fails on a partially
-        migrated database (v1, v2, or already-migrated v3).
+        migrated database (v1, v2, v3, or already-migrated v4).
         """
         assert self._conn is not None
         existing = {
@@ -162,6 +165,8 @@ class TelemetryStore:
             self._conn.execute(
                 "ALTER TABLE events ADD COLUMN legacy_event_type TEXT"
             )
+        if "sensor_id" not in existing:
+            self._conn.execute("ALTER TABLE events ADD COLUMN sensor_id TEXT")
 
     def log_event(self, event):
         if self._conn is None:
@@ -178,6 +183,7 @@ class TelemetryStore:
             "timestamp", "event_type", "session_id", "source_ip",
             "source_port", "username", "command", "cwd",
             "event_id", "schema_version", "legacy_event_type",
+            "sensor_id",
         }
         try:
             metadata = {k: v for k, v in event.items() if k not in known_keys}
@@ -185,8 +191,8 @@ class TelemetryStore:
                 self._conn.execute(
                     "INSERT INTO events (timestamp, event_type, session_id, "
                     "source_ip, source_port, username, command, cwd, metadata, "
-                    "event_id, schema_version, legacy_event_type) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "event_id, schema_version, legacy_event_type, sensor_id) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         event.get("timestamp"),
                         event.get("event_type"),
@@ -200,6 +206,7 @@ class TelemetryStore:
                         event.get("event_id"),
                         event.get("schema_version"),
                         event.get("legacy_event_type"),
+                        event.get("sensor_id"),
                     ),
                 )
                 self._conn.commit()
@@ -312,7 +319,7 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
             "source_port, username, command, cwd, metadata, "
-            "event_id, schema_version, legacy_event_type "
+            "event_id, schema_version, legacy_event_type, sensor_id "
             "FROM events WHERE timestamp >= ? AND timestamp <= ? "
             "ORDER BY id ASC LIMIT ?",
             (start, end, limit),
@@ -350,7 +357,7 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
             "source_port, username, command, cwd, metadata, "
-            "event_id, schema_version, legacy_event_type "
+            "event_id, schema_version, legacy_event_type, sensor_id "
             "FROM events WHERE session_id = ? "
             "ORDER BY timestamp ASC, id ASC LIMIT ?",
             (session_id, limit),
@@ -380,7 +387,7 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
             "source_port, username, command, cwd, metadata, "
-            "event_id, schema_version, legacy_event_type "
+            "event_id, schema_version, legacy_event_type, sensor_id "
             "FROM events ORDER BY id DESC LIMIT ?",
             (limit,),
         )
@@ -401,10 +408,34 @@ class TelemetryStore:
         rows = self._query_all(
             "SELECT timestamp, event_type, session_id, source_ip, "
             "source_port, username, command, cwd, metadata, "
-            "event_id, schema_version, legacy_event_type "
+            "event_id, schema_version, legacy_event_type, sensor_id "
             "FROM events WHERE source_ip = ? "
             "ORDER BY id DESC LIMIT ?",
             (source_ip, limit),
+        )
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_events_by_sensor(self, sensor_id, limit=100):
+        """Return events for a given sensor_id, most recent first."""
+        rows = self._query_all(
+            "SELECT timestamp, event_type, session_id, source_ip, "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version, legacy_event_type, sensor_id "
+            "FROM events WHERE sensor_id = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (sensor_id, limit),
+        )
+        return [self._row_to_dict(r) for r in rows]
+
+    def get_events_by_port(self, source_port, limit=100):
+        """Return events for a given source_port, most recent first."""
+        rows = self._query_all(
+            "SELECT timestamp, event_type, session_id, source_ip, "
+            "source_port, username, command, cwd, metadata, "
+            "event_id, schema_version, legacy_event_type, sensor_id "
+            "FROM events WHERE source_port = ? "
+            "ORDER BY id DESC LIMIT ?",
+            (source_port, limit),
         )
         return [self._row_to_dict(r) for r in rows]
 
@@ -447,7 +478,7 @@ class TelemetryStore:
     def _row_to_dict(row, include_id=False):
         keys = ["timestamp", "event_type", "session_id", "source_ip",
                 "source_port", "username", "command", "cwd", "metadata",
-                "event_id", "schema_version", "legacy_event_type"]
+                "event_id", "schema_version", "legacy_event_type", "sensor_id"]
         if include_id:
             keys = ["id"] + keys
         d = dict(zip(keys, row))
