@@ -24,6 +24,32 @@ _DEFAULT_FS = {
         "wget": "", "which": "",
     },
     "etc": {
+        "group": (
+            "root:x:0:\n"
+            "daemon:x:1:\n"
+            "bin:x:2:\n"
+            "sys:x:3:\n"
+            "adm:x:4:user1\n"
+            "sudo:x:27:user1\n"
+            "user1:x:1001:\n"
+        ),
+        "hosts": (
+            "127.0.0.1 localhost\n"
+            "127.0.1.1 ubuntu\n"
+            "\n"
+            "# The following lines are desirable for IPv6 capable hosts\n"
+            "::1     ip6-localhost ip6-loopback\n"
+            "fe00::0 ip6-localnet\n"
+            "ff00::0 ip6-mcastprefix\n"
+            "ff02::1 ip6-allnodes\n"
+            "ff02::2 ip6-allrouters\n"
+        ),
+        "resolv.conf": (
+            "# Dynamic resolv.conf(5) file for glibc resolver(3)\n"
+            "nameserver 127.0.0.53\n"
+            "options edns0 trust-ad\n"
+            "search localdomain\n"
+        ),
         "passwd": (
             "root:x:0:0:root:/root:/bin/bash\n"
             "daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n"
@@ -53,6 +79,72 @@ _DEFAULT_FS = {
             "Documents": {},
             "Downloads": {},
         }
+    },
+    "proc": {
+        # Static fabricated values, identical for every session (deep-copied
+        # from _DEFAULT_FS). Q3 resolution: static content cannot disagree
+        # across successive reads, so no per-session random is needed. The
+        # serial is X-redacted style with the variable digits fixed.
+        "cpuinfo": (
+            "processor\t: 0\n"
+            "vendor_id\t: GenuineIntel\n"
+            "cpu family\t: 6\n"
+            "model\t\t: 142\n"
+            "model name\t: Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz\n"
+            "stepping\t: 10\n"
+            "microcode\t: 0xffffffff\n"
+            "cpu MHz\t\t: 1992.000\n"
+            "cache size\t: 8192 KB\n"
+            "physical id\t: 0\n"
+            "siblings\t: 1\n"
+            "core id\t\t: 0\n"
+            "cpu cores\t: 1\n"
+            "apicid\t\t: 0\n"
+            "initial apicid\t: 0\n"
+            "fpu\t\t: yes\n"
+            "fpu_exception\t: yes\n"
+            "cpuid level\t: 22\n"
+            "wp\t\t: yes\n"
+            "flags\t\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr "
+            "pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ss ht syscall "
+            "nx pdpe1gb rdtscp lm constant_tsc arch_perfmon nopl xtopology "
+            "tsc_reliable nonstop_tsc cpuid pni pclmulqdq ssse3 cx16 pcid "
+            "sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx rdrand "
+            "hypervisor lahf_lm abm invpcid_single pti fsgsbase avx2 invpcid "
+            "rdseed clflushopt md_clear flush_l1d arch_capabilities\n"
+            "bugs\t\t: cpu_meltdown spectre_v1 spectre_v2 spec_store_bypass "
+            "l1tf mds swapgs itlb_multihit\n"
+            "bogomips\t: 3984.00\n"
+            "clflush size\t: 64\n"
+            "cache_alignment\t: 64\n"
+            "address sizes\t: 39 bits physical, 48 bits virtual\n"
+            "power management:\n"
+            "\n"
+            "serial\t\t: SNXXXX20220415\n"
+        ),
+        # MemTotal (kB) matches the `free` handler output (7964156 KiB).
+        "meminfo": (
+            "MemTotal:        7964156 kB\n"
+            "MemFree:         5416200 kB\n"
+            "MemAvailable:    6703124 kB\n"
+            "Buffers:           42318 kB\n"
+            "Cached:          1450152 kB\n"
+            "SwapCached:            0 kB\n"
+            "Active:           927544 kB\n"
+            "Inactive:        1082304 kB\n"
+            "SwapTotal:             0 kB\n"
+            "SwapFree:              0 kB\n"
+        ),
+        # Matches the uname handler parts below.
+        "version": (
+            "Linux version 5.15.0-50-generic (buildd@lcy02-amd64-007) "
+            "(gcc (Ubuntu 9.4.0-1ubuntu1~20.04.1) 9.4.0, GNU ld "
+            "(GNU Binutils for Ubuntu) 2.34) #56~20.04 SMP "
+            "Tue Sep 20 13:23:26 UTC 2022\n"
+        ),
+        # Matches the `uptime` handler output.
+        "uptime": "364320.00 1440000.00\n",
+        "loadavg": "0.08 0.03 0.01 1/187 1234\n",
     },
     "root": {},
     "tmp": {

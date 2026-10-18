@@ -23,7 +23,18 @@ from .fs import get_dir, resolve_abs, split_path
 # structured ``command`` telemetry for every command, so these are covered.
 HOME = "/home/user1"
 HOSTNAME = "ubuntu"
-UNAME = "Linux ubuntu 5.15.0-50-generic #56~20.04 SMP x86_64 GNU/Linux"
+# Uname components kept as parts so each flag returns its distinct value and
+# `uname -a` / /proc/version stay mutually consistent.
+KERNEL_NAME = "Linux"
+NODENAME = HOSTNAME
+KERNEL_RELEASE = "5.15.0-50-generic"
+KERNEL_VERSION = "#56~20.04 SMP Tue Sep 20 13:23:26 UTC 2022"
+MACHINE = "x86_64"
+OPERATING_SYSTEM = "GNU/Linux"
+UNAME = (
+    f"{KERNEL_NAME} {NODENAME} {KERNEL_RELEASE} "
+    f"{KERNEL_VERSION} {MACHINE} {OPERATING_SYSTEM}"
+)
 
 
 def _flag_tokens(tokens):
@@ -469,12 +480,33 @@ def _cmd_hostname(shell, args):
 
 
 def _cmd_uname(shell, args):
-    flags = "".join(_flag_tokens(args)[0])
+    # Canonical per-flag outputs, in the order `uname --help` documents them:
+    # s (kernel name), n (nodename), r (release), v (version), m (machine),
+    # o (operating system). Combined flags concatenate in that order.
+    order = "snrvmo"
+    flag_map = {
+        "s": KERNEL_NAME,
+        "n": NODENAME,
+        "r": KERNEL_RELEASE,
+        "v": KERNEL_VERSION,
+        "m": MACHINE,
+        "o": OPERATING_SYSTEM,
+    }
+    joined = "".join(_flag_tokens(args)[0])
+    # Strip one or two leading dashes (`-a`, `--all` style); what remains is
+    # the flag characters. Bare `--` / `-` count as no flags.
+    flags = joined.lstrip("-")
     if not flags:
-        return "Linux"
-    if flags == "a":
+        return KERNEL_NAME
+    if "a" in flags:
+        # Real uname: -a implies all; extra flags alongside it are redundant.
         return UNAME
-    return UNAME
+    if any(c not in flag_map for c in flags):
+        bad = next(c for c in flags if c not in flag_map)
+        return f"uname: invalid option -- '{bad}'\nTry 'uname --help' for more information."
+    # De-duplicate while preserving canonical order.
+    parts = [flag_map[c] for c in order if c in flags]
+    return " ".join(parts)
 
 
 def _cmd_id(shell, args):

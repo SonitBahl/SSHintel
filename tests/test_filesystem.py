@@ -29,7 +29,7 @@ class TestFilesystemCreation:
         assert isinstance(fs, dict)
 
     def test_has_root_directories(self, fs):
-        expected = {'bin', 'etc', 'home', 'root', 'tmp', 'usr', 'var'}
+        expected = {'bin', 'etc', 'home', 'proc', 'root', 'tmp', 'usr', 'var'}
         assert set(fs.keys()) == expected
 
     def test_etc_has_passwd(self, fs):
