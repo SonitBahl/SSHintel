@@ -61,6 +61,23 @@ def emulated_shell(channel, session, idle_timeout=300, tarpit=False,
             break
 
         if char == b"\r":
+            cmd_line = command.decode(errors="replace")
+            command = b""
+            keystroke_start = time.monotonic()
+
+            # Run through the fake shell. Any Python exception escaping a
+            # handler must become a simulated shell error, never crash the
+            # SSH session.
+            try:
+                output = shell.execute(cmd_line)
+            except Exception:
+                output = "bash: internal error while handling command"
+                print(f"!!! Shell handler raised for {cmd_line!r}")
+
+            if shell.exited:
+                channel.send(b"logout\r\n")
+                break
+
             if config and config.get("capture_keystrokes"):
                 elapsed_ms = int((time.monotonic() - keystroke_start) * 1000)
                 log_event(
@@ -74,35 +91,19 @@ def emulated_shell(channel, session, idle_timeout=300, tarpit=False,
                     delta_ms=elapsed_ms,
                 )
                 channel.send(b"\r\n")
-                cmd_line = command.decode(errors="replace")
-                command = b""
-                keystroke_start = time.monotonic()
 
-                # Run through the fake shell. Any Python exception escaping a
-                # handler must become a simulated shell error, never crash the
-                # SSH session.
-                try:
-                    output = shell.execute(cmd_line)
-                except Exception:
-                    output = "bash: internal error while handling command"
-                    print(f"!!! Shell handler raised for {cmd_line!r}")
-
-                if shell.exited:
-                    channel.send(b"logout\r\n")
-                    break
-
-                funnel_logger.info(f'Command "{cmd_line}" executed by {session.source_ip}')
-                log_event(
-                    'command',
-                    session_id=session.session_id,
-                    source_ip=session.source_ip,
-                    source_port=session.source_port,
-                    username=session.username,
-                    command=cmd_line,
-                    cwd=session.cwd,
-                )
-                _send_output(channel, output, tarpit, tarpit_max_seconds)
-                channel.send(_prompt(prompt_template, session.cwd))
+            funnel_logger.info(f'Command "{cmd_line}" executed by {session.source_ip}')
+            log_event(
+                'command',
+                session_id=session.session_id,
+                source_ip=session.source_ip,
+                source_port=session.source_port,
+                username=session.username,
+                command=cmd_line,
+                cwd=session.cwd,
+            )
+            _send_output(channel, output, tarpit, tarpit_max_seconds)
+            channel.send(_prompt(prompt_template, session.cwd))
         elif char == b"\x7f":
             if config and config.get("capture_keystrokes"):
                 if len(command) > 0:
