@@ -61,7 +61,7 @@ def honeypot(address='0.0.0.0', port=2222, username=None, password=None, tarpit=
                     target=_client_worker,
                     args=(client, addr, username, password, tarpit,
                           auth_timeout, session_idle_timeout, limiter,
-                          tarpit_max_seconds),
+                          tarpit_max_seconds, None),
                     name='sshintel-client', daemon=True,
                 )
                 workers[thread] = client
@@ -87,7 +87,7 @@ def honeypot(address='0.0.0.0', port=2222, username=None, password=None, tarpit=
 
 def _client_worker(client, addr, username, password, tarpit,
                    auth_timeout, session_idle_timeout, limiter,
-                   tarpit_max_seconds=120):
+                   tarpit_max_seconds=120, config=None):
     """Run one connection's lifecycle, always returning its connection slot."""
     try:
         client_handle(
@@ -95,6 +95,7 @@ def _client_worker(client, addr, username, password, tarpit,
             auth_timeout=auth_timeout,
             session_idle_timeout=session_idle_timeout,
             tarpit_max_seconds=tarpit_max_seconds,
+            config=config,
         )
     finally:
         limiter.release()

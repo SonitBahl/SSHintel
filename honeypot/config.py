@@ -24,6 +24,9 @@ DEFAULTS = {
     "db_path": None,
     "no_db": False,
     "fetch_payloads": False,
+    "capture_keystrokes": True,
+    "max_keystrokes": 5000,
+    "max_line_length": 4096,
 }
 
 

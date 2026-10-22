@@ -37,10 +37,13 @@ def _load_or_generate_host_key(path: Path) -> paramiko.RSAKey:
 host_key = _load_or_generate_host_key(host_key_path)
 
 def emulated_shell(channel, session, idle_timeout=300, tarpit=False,
-                  tarpit_max_seconds=120):
+                  tarpit_max_seconds=120, config=None):
     prompt_template = "user1@ubuntu:{}$ "
     shell = FakeShell(session)
     command = b""
+    keystroke_count = 0
+    keystroke_start = time.monotonic()
+
     # An inactivity timeout: channel.recv() raises socket.timeout if no data
     # arrives within ``idle_timeout`` seconds. Because the countdown restarts on
     # every successful recv(), an actively-typing attacker is never killed.
@@ -58,43 +61,77 @@ def emulated_shell(channel, session, idle_timeout=300, tarpit=False,
             break
 
         if char == b"\r":
-            channel.send(b"\r\n")
-            cmd_line = command.decode(errors="replace")
-            command = b""
+            if config and config.get("capture_keystrokes"):
+                elapsed_ms = int((time.monotonic() - keystroke_start) * 1000)
+                log_event(
+                    'input.keystroke',
+                    session_id=session.session_id,
+                    source_ip=session.source_ip,
+                    source_port=session.source_port,
+                    username=session.username,
+                    key="<enter>",
+                    sequence_index=keystroke_count,
+                    delta_ms=elapsed_ms,
+                )
+                channel.send(b"\r\n")
+                cmd_line = command.decode(errors="replace")
+                command = b""
+                keystroke_start = time.monotonic()
 
-            # Run through the fake shell. Any Python exception escaping a
-            # handler must become a simulated shell error, never crash the
-            # SSH session.
-            try:
-                output = shell.execute(cmd_line)
-            except Exception:
-                output = "bash: internal error while handling command"
-                print(f"!!! Shell handler raised for {cmd_line!r}")
+                # Run through the fake shell. Any Python exception escaping a
+                # handler must become a simulated shell error, never crash the
+                # SSH session.
+                try:
+                    output = shell.execute(cmd_line)
+                except Exception:
+                    output = "bash: internal error while handling command"
+                    print(f"!!! Shell handler raised for {cmd_line!r}")
 
-            if shell.exited:
-                channel.send(b"logout\r\n")
-                break
+                if shell.exited:
+                    channel.send(b"logout\r\n")
+                    break
 
-            funnel_logger.info(f'Command "{cmd_line}" executed by {session.source_ip}')
-            log_event(
-                'command',
-                session_id=session.session_id,
-                source_ip=session.source_ip,
-                source_port=session.source_port,
-                username=session.username,
-                command=cmd_line,
-                cwd=session.cwd,
-            )
-            _send_output(channel, output, tarpit, tarpit_max_seconds)
-            channel.send(_prompt(prompt_template, session.cwd))
-
+                funnel_logger.info(f'Command "{cmd_line}" executed by {session.source_ip}')
+                log_event(
+                    'command',
+                    session_id=session.session_id,
+                    source_ip=session.source_ip,
+                    source_port=session.source_port,
+                    username=session.username,
+                    command=cmd_line,
+                    cwd=session.cwd,
+                )
+                _send_output(channel, output, tarpit, tarpit_max_seconds)
+                channel.send(_prompt(prompt_template, session.cwd))
         elif char == b"\x7f":
-            if len(command) > 0:
-                command = command[:-1]
-                channel.send(b"\b \b")
+            if config and config.get("capture_keystrokes"):
+                if len(command) > 0:
+                    command = command[:-1]
+                    channel.send(b"\b \b")
         else:
-            channel.send(char)
-            command += char
+            if config and config.get("capture_keystrokes"):
+                keystroke_count += 1
+                if keystroke_count >= config.get("max_keystrokes", 5000):
+                    channel.send(b"\a")
+                    continue
+                if len(char) > config.get("max_line_length", 4096):
+                    continue
+                elapsed_ms = int((time.monotonic() - keystroke_start) * 1000)
+                log_event(
+                    'input.keystroke',
+                    session_id=session.session_id,
+                    source_ip=session.source_ip,
+                    source_port=session.source_port,
+                    username=session.username,
+                    key=char.decode(errors="replace"),
+                    sequence_index=keystroke_count - 1,
+                    delta_ms=elapsed_ms,
+                )
+                channel.send(char)
+                command += char
+            else:
+                channel.send(char)
+                command += char
 
     channel.close()
 
@@ -141,7 +178,7 @@ def _send_output(channel, output, tarpit, tarpit_max_seconds):
 
 def client_handle(client, addr, username, password, tarpit=False,
                   auth_timeout=60, session_idle_timeout=300, max_connections=50,
-                  tarpit_max_seconds=120):
+                  tarpit_max_seconds=120, config=None):
     client_ip = addr[0]
     session = Session(source_ip=client_ip, source_port=addr[1])
     print(f"{client_ip} connected to server.")
@@ -181,7 +218,7 @@ def client_handle(client, addr, username, password, tarpit=False,
             log_event('tarpit', session_id=session.session_id, source_ip=session.source_ip, source_port=addr[1])
         channel.send(banner)
         emulated_shell(channel, session, idle_timeout=session_idle_timeout,
-                       tarpit=tarpit)
+                       tarpit=tarpit, config=config)
 
     except socket.timeout:
         if in_auth_phase:
