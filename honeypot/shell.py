@@ -16,6 +16,7 @@ import shlex
 import time
 
 from .fs import get_dir, resolve_abs, split_path
+from .logger import log_event
 
 # Commands that a honeypot explicitly simulates as suspicious/intent telemetry.
 # They perform no real action (no network, no exec, no host permission change);
@@ -54,12 +55,18 @@ def _node(shell, path):
 
 
 def _read_file(shell, target):
-    """Return file content string at ``target``, or a simulated error message."""
-    node = _node(shell, shell._resolve(target))
+    """Return file content string at ``target``, or a simulated error message.
+
+    Successful file reads emit ``filesystem.read``. Missing paths and
+    directories emit nothing: failed operations are not filesystem events.
+    """
+    abs_path = shell._resolve(target)
+    node = _node(shell, abs_path)
     if node is None:
         return f"cat: {target}: No such file or directory"
     if isinstance(node, dict):
         return f"cat: {target}: Is a directory"
+    shell._emit_fs_event("read", abs_path, len(node))
     return node
 
 
@@ -132,6 +139,7 @@ def _cmd_mkdir(shell, args):
         if base in node:
             return f"mkdir: cannot create directory '{target}': File exists"
         node[base] = {}
+        shell._emit_fs_event("create", abs_path, 0)
     return ""
 
 
@@ -147,7 +155,12 @@ def _cmd_touch(shell, args):
             return f"touch: cannot touch '{target}': No such file or directory"
         if base in node and isinstance(node[base], dict):
             return f"touch: cannot touch '{target}': Is a directory"
+        created = base not in node
         node[base] = ""
+        if created:
+            shell._emit_fs_event("create", abs_path, 0)
+        else:
+            shell._emit_fs_event("write", abs_path, 0)
     return ""
 
 
@@ -164,7 +177,10 @@ def _cmd_rm(shell, args):
             if not force:
                 return f"rm: cannot remove '{target}': No such file or directory"
             continue
+        removed = node[base]
+        nbytes = 0 if isinstance(removed, dict) else len(removed)
         del node[base]
+        shell._emit_fs_event("delete", abs_path, nbytes)
     return ""
 
 
@@ -205,7 +221,11 @@ def _cmd_echo(shell, args):
             return f"bash: {redirect}: No such file or directory"
         if base in node and isinstance(node[base], dict):
             return f"bash: {redirect}: Is a directory"
+        created = base not in node
         node[base] = msg
+        if created:
+            shell._emit_fs_event("create", abs_path, 0)
+        shell._emit_fs_event("write", abs_path, len(msg))
         return ""
     return msg if not newline else msg
 def _cmd_tree(shell, args):
@@ -700,6 +720,23 @@ class FakeShell:
     def _resolve(self, target):
         """Resolve a (possibly relative) path against the session cwd."""
         return resolve_abs(self.session.cwd, target)
+
+    def _emit_fs_event(self, action, path, nbytes=0):
+        """Emit a dotted ``filesystem.*`` event for a successful FS mutation.
+
+        Handlers call this helper instead of ``log_event`` so path/bytes
+        fields stay consistent. Failed operations must not call it.
+        """
+        session = self.session
+        log_event(
+            f"filesystem.{action}",
+            session_id=session.session_id,
+            source_ip=session.source_ip,
+            source_port=session.source_port,
+            username=session.username,
+            path=path,
+            bytes=nbytes,
+        )
 
     def execute(self, line):
         """Parse and run one command line. Returns output string ('' ok).
