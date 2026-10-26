@@ -93,6 +93,7 @@ def emulated_shell(channel, session, idle_timeout=300, tarpit=False,
                 channel.send(b"\r\n")
 
             funnel_logger.info(f'Command "{cmd_line}" executed by {session.source_ip}')
+            preview_limit = config.get("output_preview_chars", 500) if config else 500
             log_event(
                 'command',
                 session_id=session.session_id,
@@ -101,6 +102,8 @@ def emulated_shell(channel, session, idle_timeout=300, tarpit=False,
                 username=session.username,
                 command=cmd_line,
                 cwd=session.cwd,
+                output_preview=_output_preview(output, preview_limit),
+                output_bytes=len(output.encode()) if output else 0,
             )
             _send_output(channel, output, tarpit, tarpit_max_seconds)
             channel.send(_prompt(prompt_template, session.cwd))
@@ -160,6 +163,22 @@ def _send_slow_lines(channel, payload, max_seconds):
         if remaining <= 0:
             continue
         time.sleep(min(0.2, remaining))
+
+
+def _output_preview(output, limit):
+    """Return a capped preview of command output.
+
+    Output longer than ``limit`` characters is truncated with an explicit
+    marker so the telemetry store never holds unbounded output (e.g. ``tree /``
+    is a cheap disk bomb). ``limit`` must be a positive integer.
+    """
+    if limit <= 0:
+        return ""
+    if output is None:
+        return ""
+    if len(output) <= limit:
+        return output
+    return output[:limit] + "\n... <output truncated>"
 
 
 def _send_output(channel, output, tarpit, tarpit_max_seconds):

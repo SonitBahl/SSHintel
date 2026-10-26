@@ -46,6 +46,9 @@ creds_logger.addHandler(creds_handler)
 # readable source of truth for attacker activity (connect, auth_attempt,
 # auth_success, auth_failure, command, disconnect, tarpit, filesystem.*,
 # network.attempt).
+# ``command`` (dotted ``command.executed``) also carries ``output_preview`` and
+# ``output_bytes`` so the attacker's observed output is visible without unbounded
+# growth.
 
 event_logger = logging.getLogger('EventLogger')
 event_logger.setLevel(logging.INFO)

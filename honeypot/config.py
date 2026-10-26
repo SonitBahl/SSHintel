@@ -27,6 +27,7 @@ DEFAULTS = {
     "capture_keystrokes": True,
     "max_keystrokes": 5000,
     "max_line_length": 4096,
+    "output_preview_chars": 500,
 }
 
 
