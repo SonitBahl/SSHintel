@@ -639,21 +639,58 @@ def _cmd_curl(shell, args):
     return "curl: try 'curl --help' or 'curl --manual' for more information"
 
 
+def _ssh_style_host(args):
+    """Return the host from a ``user@host`` / ``user@host:path`` token, or None."""
+    token = next((a for a in args if not a.startswith("-") and "@" in a), None)
+    if token is None:
+        return None
+    host = token.rsplit("@", 1)[-1]
+    if ":" in host and not host.startswith("["):
+        host = host.split(":", 1)[0]
+    return host or None
+
+
+def _flag_int(args, flag, default):
+    """Return the integer value of ``flag`` (``-p`` / ``-P``) or ``default``."""
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == flag and i + 1 < len(args):
+            try:
+                return int(args[i + 1])
+            except ValueError:
+                return default
+        suffix = a[len(flag):]
+        if a.startswith(flag) and suffix.isdigit():
+            return int(suffix)
+        i += 1
+    return default
+
+
 def _cmd_ssh(shell, args):
-    # Simulated: no connection is made.
-    target = next((a for a in args if not a.startswith("-") and "@" in a), None)
-    if not target:
+    # Simulated: no connection is made. Intent is recorded as network.attempt.
+    token = next((a for a in args if not a.startswith("-") and "@" in a), None)
+    if not token:
         return "usage: ssh [-46AaCfGgKkMNnqsTtVvXxYy] [-B bind_interface]\n"
-    host = target.rsplit("@", 1)[-1]
-    return f"ssh: connect to host {host} port 22: Connection refused"
+    display_host = token.rsplit("@", 1)[-1]
+    host = _ssh_style_host(args)
+    port = _flag_int(args, "-p", 22)
+    if host:
+        shell._emit_network_event(host, port, "ssh")
+    return f"ssh: connect to host {display_host} port 22: Connection refused"
 
 
 def _cmd_scp(shell, args):
-    target = next((a for a in args if not a.startswith("-") and "@" in a), None)
-    if not target:
+    # Simulated: no connection is made. Intent is recorded as network.attempt.
+    token = next((a for a in args if not a.startswith("-") and "@" in a), None)
+    if not token:
         return "usage: scp [-346BCpqrTv] [-c cipher] [-F ssh_config] [-i identity_file]\n"
-    host = target.rsplit("@", 1)[-1]
-    return f"ssh: connect to host {host} port 22: Connection refused"
+    display_host = token.rsplit("@", 1)[-1]
+    host = _ssh_style_host(args)
+    port = _flag_int(args, "-P", 22)
+    if host:
+        shell._emit_network_event(host, port, "scp")
+    return f"ssh: connect to host {display_host} port 22: Connection refused"
 
 
 # --------------------------------------------------------------------------- #
@@ -736,6 +773,23 @@ class FakeShell:
             username=session.username,
             path=path,
             bytes=nbytes,
+        )
+
+    def _emit_network_event(self, target, port, protocol):
+        """Emit ``network.attempt`` for a simulated outbound connection.
+
+        Makes no real connection. Failed/usage-only invocations must not call this.
+        """
+        session = self.session
+        log_event(
+            "network.attempt",
+            session_id=session.session_id,
+            source_ip=session.source_ip,
+            source_port=session.source_port,
+            username=session.username,
+            target=target,
+            port=port,
+            protocol=protocol,
         )
 
     def execute(self, line):

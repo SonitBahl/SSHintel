@@ -44,7 +44,8 @@ creds_logger.addHandler(creds_handler)
 # --- Structured security event logger (JSON Lines) -------------------------
 # Each event is one valid JSON object on one line. This is the machine-
 # readable source of truth for attacker activity (connect, auth_attempt,
-# auth_success, auth_failure, command, disconnect, tarpit, filesystem.*).
+# auth_success, auth_failure, command, disconnect, tarpit, filesystem.*,
+# network.attempt).
 
 event_logger = logging.getLogger('EventLogger')
 event_logger.setLevel(logging.INFO)
