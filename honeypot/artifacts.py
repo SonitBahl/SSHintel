@@ -20,7 +20,7 @@ import urllib.parse
 import urllib.request
 from typing import List, Optional, Tuple
 
-from .logger import log_event
+from .logger import log_event, _telemetry_store
 
 # Conservative regex for http/https URLs anywhere inside a command line.
 _URL_RE = re.compile(r"https?://[^\s\"'<>]+")
@@ -230,8 +230,9 @@ def fetch_payload(url, config=None, session_id=None, source_ip=None,
             os.write(fd, content)
         finally:
             os.close(fd)
+        disk_was_new = True
     except FileExistsError:
-        pass
+        disk_was_new = False  # already stored by an earlier fetch (dedup)
     except Exception:
         return None
 
@@ -248,6 +249,22 @@ def fetch_payload(url, config=None, session_id=None, source_ip=None,
         "stored_path": stored_path,
     }
 
+    # --- Commit 15: record artifact metadata, dedup by sha256 --------------
+    kind = content_type.split(";")[0].strip() or "downloaded"
+    is_new_artifact = False
+    if _telemetry_store is not None and _telemetry_store.is_open:
+        try:
+            is_new_artifact = _telemetry_store.log_artifact(
+                sha256=sha256,
+                size=len(content),
+                content_type=content_type,
+                stored_path=stored_path,
+                kind=kind,
+                timestamp=result.get("timestamp", ""),
+            )
+        except Exception:
+            pass
+
     if session_id is not None:
         try:
             log_event(
@@ -258,6 +275,20 @@ def fetch_payload(url, config=None, session_id=None, source_ip=None,
                 username=username,
                 **result,
             )
+            # Emit artifact.created only when this artifact is first seen.
+            if is_new_artifact:
+                log_event(
+                    "artifact.created",
+                    session_id=session_id,
+                    source_ip=source_ip,
+                    source_port=source_port,
+                    username=username,
+                    sha256=sha256,
+                    size=len(content),
+                    content_type=content_type,
+                    stored_path=stored_path,
+                    kind=kind,
+                )
         except Exception:
             pass
 

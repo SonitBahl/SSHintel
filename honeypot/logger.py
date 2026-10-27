@@ -45,9 +45,10 @@ creds_logger.addHandler(creds_handler)
 # Each event is one valid JSON object on one line. This is the machine-
 # readable source of truth for attacker activity (connect, auth_attempt,
 # auth_success, auth_failure, command, disconnect, tarpit, filesystem.*,
-# network.attempt, url.observed).
+# network.attempt, url.observed, payload.downloaded, artifact.created).
 # ``url.observed`` events are additionally deduplicated into the ``urls``
-# SQLite table (see TelemetryStore.log_url).
+# SQLite table; ``payload.downloaded`` / ``artifact.created`` events are
+# mirrored into the ``artifacts`` table (see TelemetryStore.log_artifact).
 
 event_logger = logging.getLogger('EventLogger')
 event_logger.setLevel(logging.INFO)

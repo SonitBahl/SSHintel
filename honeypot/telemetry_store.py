@@ -85,6 +85,17 @@ CREATE TABLE IF NOT EXISTS urls (
     last_seen  TEXT NOT NULL,
     times_seen INTEGER NOT NULL DEFAULT 1
 );
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    sha256       TEXT PRIMARY KEY,
+    size         INTEGER NOT NULL,
+    content_type TEXT NOT NULL DEFAULT '',
+    first_seen   TEXT NOT NULL,
+    last_seen    TEXT NOT NULL,
+    times_seen   INTEGER NOT NULL DEFAULT 1,
+    stored_path  TEXT NOT NULL,
+    kind         TEXT NOT NULL DEFAULT 'downloaded'
+);
 """
 
 INDEXES_SQL = [
@@ -100,6 +111,9 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);",
     "CREATE INDEX IF NOT EXISTS idx_urls_last_seen ON urls(last_seen);",
     "CREATE INDEX IF NOT EXISTS idx_urls_times_seen ON urls(times_seen);",
+    "CREATE INDEX IF NOT EXISTS idx_artifacts_sha256 ON artifacts(sha256);",
+    "CREATE INDEX IF NOT EXISTS idx_artifacts_times_seen ON artifacts(times_seen);",
+    "CREATE INDEX IF NOT EXISTS idx_artifacts_kind ON artifacts(kind);",
 ]
 
 
@@ -244,6 +258,40 @@ class TelemetryStore:
                 self._conn.commit()
         except Exception as exc:
             print(f"!!! SQLite URL telemetry error: {exc}")
+
+    def log_artifact(self, sha256: str, size: int, content_type: str,
+                     stored_path: str, kind: str, timestamp: str) -> bool:
+        """Insert or dedup-sert an artifact into the ``artifacts`` table.
+
+        On first sighting: inserts with ``times_seen = 1`` and returns ``True``.
+        On repeat sighting: updates ``last_seen`` and increments ``times_seen``,
+        preserving the original ``first_seen`` and ``stored_path``, returns
+        ``False``.
+        """
+        if self._conn is None:
+            return False
+        try:
+            with self._lock:
+                existing = self._conn.execute(
+                    "SELECT 1 FROM artifacts WHERE sha256 = ?", (sha256,)
+                ).fetchone()
+                is_new = existing is None
+                self._conn.execute(
+                    "INSERT INTO artifacts "
+                    "(sha256, size, content_type, first_seen, last_seen, "
+                    "times_seen, stored_path, kind) "
+                    "VALUES (?, ?, ?, ?, ?, 1, ?, ?) "
+                    "ON CONFLICT(sha256) DO UPDATE SET "
+                    "last_seen = excluded.last_seen, "
+                    "times_seen = times_seen + 1",
+                    (sha256, size, content_type, timestamp, timestamp,
+                     stored_path, kind),
+                )
+                self._conn.commit()
+                return is_new
+        except Exception as exc:
+            print(f"!!! SQLite artifact telemetry error: {exc}")
+            return False
 
     def record_session_connect(self, session_id, source_ip, connected_at):
         if self._conn is None:
