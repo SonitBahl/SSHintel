@@ -45,10 +45,9 @@ creds_logger.addHandler(creds_handler)
 # Each event is one valid JSON object on one line. This is the machine-
 # readable source of truth for attacker activity (connect, auth_attempt,
 # auth_success, auth_failure, command, disconnect, tarpit, filesystem.*,
-# network.attempt).
-# ``command`` (dotted ``command.executed``) also carries ``output_preview`` and
-# ``output_bytes`` so the attacker's observed output is visible without unbounded
-# growth.
+# network.attempt, url.observed).
+# ``url.observed`` events are additionally deduplicated into the ``urls``
+# SQLite table (see TelemetryStore.log_url).
 
 event_logger = logging.getLogger('EventLogger')
 event_logger.setLevel(logging.INFO)
@@ -139,6 +138,11 @@ def log_event(event_type, session_id=None, source_ip=None, **extra):
         # Mirror the event into the SQLite telemetry store if one is configured.
         if _telemetry_store is not None and _telemetry_store.is_open:
             _telemetry_store.log_event(event)
+            # Deduplicate url.observed events into the urls table.
+            if event_type == "url.observed":
+                _telemetry_store.log_url(
+                    event.get("url"), event.get("timestamp")
+                )
     except Exception as exc:
         print(f"!!! Failed to write security event ({event_type}): {exc}")
 

@@ -78,6 +78,13 @@ CREATE TABLE IF NOT EXISTS meta (
     key   TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS urls (
+    url        TEXT PRIMARY KEY,
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    times_seen INTEGER NOT NULL DEFAULT 1
+);
 """
 
 INDEXES_SQL = [
@@ -91,6 +98,8 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_events_source_port ON events(source_port);",
     "CREATE INDEX IF NOT EXISTS idx_sessions_source_ip ON sessions(source_ip);",
     "CREATE INDEX IF NOT EXISTS idx_sessions_started_at ON sessions(started_at);",
+    "CREATE INDEX IF NOT EXISTS idx_urls_last_seen ON urls(last_seen);",
+    "CREATE INDEX IF NOT EXISTS idx_urls_times_seen ON urls(times_seen);",
 ]
 
 
@@ -212,6 +221,29 @@ class TelemetryStore:
                 self._conn.commit()
         except Exception as exc:
             print(f"!!! SQLite telemetry error: {exc}")
+
+    def log_url(self, url: str, timestamp: str) -> None:
+        """Insert or dedup-sert a URL sighting into the ``urls`` table.
+
+        On first sighting: inserts with ``times_seen = 1``.
+        On repeat sighting: updates ``last_seen`` and increments ``times_seen``,
+        preserving the original ``first_seen``.
+        """
+        if self._conn is None:
+            return
+        try:
+            with self._lock:
+                self._conn.execute(
+                    "INSERT INTO urls (url, first_seen, last_seen, times_seen) "
+                    "VALUES (?, ?, ?, 1) "
+                    "ON CONFLICT(url) DO UPDATE SET "
+                    "last_seen = excluded.last_seen, "
+                    "times_seen = times_seen + 1",
+                    (url, timestamp, timestamp),
+                )
+                self._conn.commit()
+        except Exception as exc:
+            print(f"!!! SQLite URL telemetry error: {exc}")
 
     def record_session_connect(self, session_id, source_ip, connected_at):
         if self._conn is None:

@@ -15,6 +15,7 @@ import re
 import shlex
 import time
 
+from .artifacts import extract_urls, emit_url_observed
 from .fs import get_dir, resolve_abs, split_path
 from .logger import log_event
 
@@ -829,4 +830,13 @@ class FakeShell:
         if result == "__EXIT__":
             self.exited = True
             return ""
+
+        # Commit 13: extract URLs from the executed command line and emit
+        # url.observed events. No real network access; never breaks execution.
+        try:
+            for url, tool in extract_urls(line):
+                emit_url_observed(self, url, tool, line)
+        except Exception:
+            pass
+
         return result
