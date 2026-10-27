@@ -9,6 +9,9 @@ log_files/*
 
 # SQLite telemetry databases (runtime data)
 data/
+# Payload artifacts fetched via --fetch-payloads (never commit downloaded
+# malware); covered by `data/` above but listed explicitly for clarity.
+data/artifacts/
 *.db
 *.db-shm
 *.db-wal

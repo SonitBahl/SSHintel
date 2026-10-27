@@ -152,9 +152,12 @@ def test_examples_are_valid(tmp_path):
         assert settings["fetch_payloads"] is False
 
 
-def test_payload_fetching_cannot_silently_enable():
-    with pytest.raises(config.ConfigError, match="not implemented"):
-        config.load_config(environ={"HONEYPOT_FETCH_PAYLOADS": "true"})
+def test_payload_fetching_can_be_enabled():
+    settings = config.load_config(environ={"HONEYPOT_FETCH_PAYLOADS": "true"})
+    assert settings["fetch_payloads"] is True
+    assert settings["fetch_max_size"] == 5 * 1024 * 1024
+    assert settings["fetch_timeout"] == 10
+    assert settings["fetch_max_redirects"] == 3
 
 
 def test_parser_only_supplies_explicit_values():

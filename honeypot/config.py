@@ -28,6 +28,11 @@ DEFAULTS = {
     "max_keystrokes": 5000,
     "max_line_length": 4096,
     "output_preview_chars": 500,
+    # Commit 14 — safe payload fetch (§14.3 safety controls). fetch_payloads is
+    # opt-in and defaults to False; the fetch_* controls bound every download.
+    "fetch_max_size": 5 * 1024 * 1024,   # 5 MB cap
+    "fetch_timeout": 10,                 # 10 s connect + read
+    "fetch_max_redirects": 3,            # max redirect hops
 }
 
 
@@ -107,6 +112,4 @@ def load_config(cli=None, environ=None, config_path=None):
             settings[key] = _validate(key, environ["PORT"], environment=True)
     for key, value in cli.items():
         settings[key] = _validate(key, value)
-    if settings["fetch_payloads"]:
-        raise ConfigError("fetch_payloads is not implemented; it must remain false")
     return settings

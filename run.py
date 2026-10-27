@@ -88,7 +88,8 @@ def build_parser():
     hp.add_argument("--no-db", action="store_true", help="Disable SQLite telemetry storage")
     hp.add_argument("--no-tarpit", dest="tarpit", action="store_false", help="Disable tarpit mode")
     hp.add_argument("--db-enabled", dest="no_db", action="store_false", help="Enable SQLite telemetry storage")
-    hp.add_argument("--fetch-payloads", action="store_true", help="Reserved; enabling is not supported yet")
+    hp.add_argument("--fetch-payloads", action="store_true",
+                    help="Enable safe payload fetch (opt-in, default off; §14.3 controls apply)")
     hp.add_argument("--no-fetch-payloads", dest="fetch_payloads", action="store_false")
 
     # --- Telemetry queries ---
