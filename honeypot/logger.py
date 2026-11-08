@@ -47,8 +47,9 @@ creds_logger.addHandler(creds_handler)
 # auth_success, auth_failure, command, disconnect, tarpit, filesystem.*,
 # network.attempt, url.observed, payload.downloaded, artifact.created).
 # ``url.observed`` events are additionally deduplicated into the ``urls``
-# SQLite table; ``payload.downloaded`` / ``artifact.created`` events are
-# mirrored into the ``artifacts`` table (see TelemetryStore.log_artifact).
+# SQLite table; ``payload.downloaded`` events also write ``artifact_links``
+# rows; ``artifact.created`` events are mirrored into the ``artifacts`` table
+# (see TelemetryStore.log_artifact / log_artifact_link).
 
 event_logger = logging.getLogger('EventLogger')
 event_logger.setLevel(logging.INFO)
@@ -143,6 +144,16 @@ def log_event(event_type, session_id=None, source_ip=None, **extra):
             if event_type == "url.observed":
                 _telemetry_store.log_url(
                     event.get("url"), event.get("timestamp")
+                )
+            # Write artifact_links row for payload.downloaded events.
+            if event_type == "payload.downloaded":
+                _telemetry_store.log_artifact_link(
+                    sha256=event.get("sha256"),
+                    session_id=event.get("session_id"),
+                    source_ip=event.get("source_ip"),
+                    sensor_id=event.get("sensor_id"),
+                    url=event.get("url"),
+                    observed_at=event.get("timestamp"),
                 )
     except Exception as exc:
         print(f"!!! Failed to write security event ({event_type}): {exc}")

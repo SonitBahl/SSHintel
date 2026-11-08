@@ -96,6 +96,37 @@ CREATE TABLE IF NOT EXISTS artifacts (
     stored_path  TEXT NOT NULL,
     kind         TEXT NOT NULL DEFAULT 'downloaded'
 );
+
+CREATE TABLE IF NOT EXISTS artifact_links (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    sha256      TEXT NOT NULL,
+    session_id  TEXT,
+    source_ip   TEXT,
+    sensor_id   TEXT,
+    url         TEXT,
+    observed_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS entities (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind       TEXT NOT NULL,
+    value      TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    times_seen INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(kind, value)
+);
+
+CREATE TABLE IF NOT EXISTS relations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_a_id INTEGER NOT NULL,
+    entity_b_id INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    first_seen  TEXT NOT NULL,
+    last_seen   TEXT NOT NULL,
+    times_seen  INTEGER NOT NULL DEFAULT 1,
+    UNIQUE(entity_a_id, entity_b_id, kind)
+);
 """
 
 INDEXES_SQL = [
@@ -114,6 +145,14 @@ INDEXES_SQL = [
     "CREATE INDEX IF NOT EXISTS idx_artifacts_sha256 ON artifacts(sha256);",
     "CREATE INDEX IF NOT EXISTS idx_artifacts_times_seen ON artifacts(times_seen);",
     "CREATE INDEX IF NOT EXISTS idx_artifacts_kind ON artifacts(kind);",
+    "CREATE INDEX IF NOT EXISTS idx_artifact_links_sha256 ON artifact_links(sha256);",
+    "CREATE INDEX IF NOT EXISTS idx_artifact_links_session_id ON artifact_links(session_id);",
+    "CREATE INDEX IF NOT EXISTS idx_artifact_links_source_ip ON artifact_links(source_ip);",
+    "CREATE INDEX IF NOT EXISTS idx_entities_kind ON entities(kind);",
+    "CREATE INDEX IF NOT EXISTS idx_entities_value ON entities(value);",
+    "CREATE INDEX IF NOT EXISTS idx_relations_entity_a ON relations(entity_a_id);",
+    "CREATE INDEX IF NOT EXISTS idx_relations_entity_b ON relations(entity_b_id);",
+    "CREATE INDEX IF NOT EXISTS idx_relations_kind ON relations(kind);",
 ]
 
 
@@ -293,6 +332,29 @@ class TelemetryStore:
             print(f"!!! SQLite artifact telemetry error: {exc}")
             return False
 
+    def log_artifact_link(self, sha256: str, session_id: str = None,
+                          source_ip: str = None, sensor_id: str = None,
+                          url: str = None, observed_at: str = None) -> None:
+        """Write an ``artifact_links`` row tying an artifact to a session/IP.
+
+        Called alongside ``payload.downloaded`` so the relationship graph can
+        answer "which sessions fetched this sha256?" with one indexed query.
+        """
+        if self._conn is None:
+            return
+        try:
+            with self._lock:
+                self._conn.execute(
+                    "INSERT INTO artifact_links "
+                    "(sha256, session_id, source_ip, sensor_id, url, observed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (sha256, session_id, source_ip, sensor_id, url,
+                     observed_at),
+                )
+                self._conn.commit()
+        except Exception as exc:
+            print(f"!!! SQLite artifact-link telemetry error: {exc}")
+
     def record_session_connect(self, session_id, source_ip, connected_at):
         if self._conn is None:
             return
@@ -334,6 +396,112 @@ class TelemetryStore:
         except Exception as exc:
             print(f"!!! SQLite error recording session finalize: {exc}")
             print(f"!!! SQLite session-finalize error: {exc}")
+
+    # ---- Correlation pass (entities + relations) --------------------------
+
+    def _get_or_create_entity(self, kind, value, timestamp):
+        """Return the entity id for ``(kind, value)``, inserting if needed."""
+        if self._conn is None:
+            return 0
+        row = self._conn.execute(
+            "SELECT id, times_seen, first_seen FROM entities "
+            "WHERE kind = ? AND value = ?", (kind, value)
+        ).fetchone()
+        if row is not None:
+            entity_id, times_seen, first_seen = row
+            self._conn.execute(
+                "UPDATE entities SET last_seen = ?, times_seen = times_seen + 1 "
+                "WHERE id = ?", (timestamp, entity_id)
+            )
+            return entity_id
+        cur = self._conn.execute(
+            "INSERT INTO entities (kind, value, first_seen, last_seen, times_seen) "
+            "VALUES (?, ?, ?, ?, 1)", (kind, value, timestamp, timestamp)
+        )
+        return cur.lastrowid
+
+    def _get_or_create_relation(self, entity_a_id, entity_b_id, kind,
+                                timestamp):
+        """Insert or dedup-sert a relation between two entities."""
+        if self._conn is None:
+            return
+        row = self._conn.execute(
+            "SELECT id, times_seen, first_seen FROM relations "
+            "WHERE entity_a_id = ? AND entity_b_id = ? AND kind = ?",
+            (entity_a_id, entity_b_id, kind)
+        ).fetchone()
+        if row is not None:
+            rel_id, times_seen, first_seen = row
+            self._conn.execute(
+                "UPDATE relations SET last_seen = ?, times_seen = times_seen + 1 "
+                "WHERE id = ?", (timestamp, rel_id)
+            )
+        else:
+            self._conn.execute(
+                "INSERT INTO relations "
+                "(entity_a_id, entity_b_id, kind, first_seen, last_seen, times_seen) "
+                "VALUES (?, ?, ?, ?, ?, 1)",
+                (entity_a_id, entity_b_id, kind, timestamp, timestamp)
+            )
+
+    def run_correlation(self, limit=1000):
+        """Run an idempotent correlation pass over artifact links.
+
+        Reads ``artifact_links`` and populates ``entities`` and ``relations``.
+        Safe to call on demand or after a session ends; never blocks the SSH
+        write path because it is invoked explicitly, not from ``log_event``.
+
+        Returns the number of link rows processed.
+        """
+        if self._conn is None:
+            return 0
+        processed = 0
+        try:
+            with self._lock:
+                links = self._conn.execute(
+                    "SELECT sha256, session_id, source_ip, sensor_id, url, "
+                    "observed_at FROM artifact_links ORDER BY id LIMIT ?",
+                    (limit,),
+                ).fetchall()
+                for sha256, session_id, source_ip, sensor_id, url, \
+                        observed_at in links:
+                    ts = observed_at or ""
+                    # Entities.
+                    ent_sha = self._get_or_create_entity("sha256", sha256, ts)
+                    ent_ip = None
+                    if source_ip:
+                        ent_ip = self._get_or_create_entity("ip", source_ip, ts)
+                    ent_url = None
+                    if url:
+                        ent_url = self._get_or_create_entity("url", url, ts)
+                    ent_session = None
+                    if session_id:
+                        ent_session = self._get_or_create_entity(
+                            "session", session_id, ts)
+                    if sensor_id:
+                        self._get_or_create_entity("sensor", sensor_id, ts)
+
+                    # Relations: IP fetched sha256.
+                    if ent_ip and ent_sha:
+                        self._get_or_create_relation(
+                            ent_ip, ent_sha, "fetched", ts)
+                    # Relation: sha256 came from url.
+                    if ent_sha and ent_url:
+                        self._get_or_create_relation(
+                            ent_sha, ent_url, "from_url", ts)
+                    # Relation: session fetched sha256.
+                    if ent_session and ent_sha:
+                        self._get_or_create_relation(
+                            ent_session, ent_sha, "session_fetched", ts)
+                    # Relation: IP had session.
+                    if ent_ip and ent_session:
+                        self._get_or_create_relation(
+                            ent_ip, ent_session, "ip_session", ts)
+                    processed += 1
+                self._conn.commit()
+        except Exception as exc:
+            print(f"!!! SQLite correlation error: {exc}")
+        return processed
 
     # ---- Query helpers ----
 
@@ -528,6 +696,77 @@ class TelemetryStore:
             (f"-{hours} hours",),
         )
         return [{"hour": r[0], "count": r[1]} for r in rows]
+
+    # ---- Investigation query helpers ----
+
+    def get_sessions_by_artifact(self, sha256, limit=100):
+        """Return distinct sessions that fetched the given artifact sha256."""
+        if self._conn is None:
+            return []
+        try:
+            rows = self._query_all(
+                "SELECT DISTINCT session_id, source_ip, observed_at "
+                "FROM artifact_links WHERE sha256 = ? "
+                "ORDER BY observed_at DESC LIMIT ?",
+                (sha256, limit),
+            )
+            return [{"session_id": r[0], "source_ip": r[1],
+                     "observed_at": r[2]} for r in rows]
+        except Exception as exc:
+            print(f"!!! SQLite get_sessions_by_artifact error: {exc}")
+            return []
+
+    def get_artifacts_by_session(self, session_id, limit=100):
+        """Return distinct artifacts fetched by the given session."""
+        if self._conn is None:
+            return []
+        try:
+            rows = self._query_all(
+                "SELECT DISTINCT sha256, url, observed_at "
+                "FROM artifact_links WHERE session_id = ? "
+                "ORDER BY observed_at DESC LIMIT ?",
+                (session_id, limit),
+            )
+            return [{"sha256": r[0], "url": r[1], "observed_at": r[2]}
+                    for r in rows]
+        except Exception as exc:
+            print(f"!!! SQLite get_artifacts_by_session error: {exc}")
+            return []
+
+    def get_artifacts_by_ip(self, source_ip, limit=100):
+        """Return distinct artifacts fetched from the given source IP."""
+        if self._conn is None:
+            return []
+        try:
+            rows = self._query_all(
+                "SELECT DISTINCT sha256, COUNT(*) AS cnt "
+                "FROM artifact_links WHERE source_ip = ? "
+                "GROUP BY sha256 ORDER BY cnt DESC LIMIT ?",
+                (source_ip, limit),
+            )
+            return [{"sha256": r[0], "times_seen": r[1]} for r in rows]
+        except Exception as exc:
+            print(f"!!! SQLite get_artifacts_by_ip error: {exc}")
+            return []
+
+    def get_relations_for_entity(self, entity_id, limit=100):
+        """Return all relations involving the given entity."""
+        if self._conn is None:
+            return []
+        try:
+            rows = self._query_all(
+                "SELECT id, entity_a_id, entity_b_id, kind, first_seen, "
+                "last_seen, times_seen FROM relations "
+                "WHERE entity_a_id = ? OR entity_b_id = ? "
+                "ORDER BY id DESC LIMIT ?",
+                (entity_id, entity_id, limit),
+            )
+            cols = ["id", "entity_a_id", "entity_b_id", "kind",
+                    "first_seen", "last_seen", "times_seen"]
+            return [dict(zip(cols, r)) for r in rows]
+        except Exception as exc:
+            print(f"!!! SQLite get_relations_for_entity error: {exc}")
+            return []
 
     # ---- Internal helpers ----
 
