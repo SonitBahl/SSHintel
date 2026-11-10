@@ -18,11 +18,12 @@ jobs:
     runs-on: ubuntu-latest
 
     # Test against supported Python versions.
-    # Paramiko 3.4 supports Python 3.8+; we test 3.8, 3.10, 3.12.
+    # Paramiko 3.4 supports Python 3.8+; Python 3.8 is no longer available on
+    # the ubuntu-latest runner image as of Ubuntu 26.04.
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.8', '3.10', '3.12']
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
 
     steps:
       # Step 1: Check out the repository.
